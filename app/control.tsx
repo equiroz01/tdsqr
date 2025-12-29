@@ -1,0 +1,729 @@
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  TextInput,
+  ScrollView,
+  Alert,
+  Image,
+  Dimensions,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as ImagePicker from 'expo-image-picker';
+import QRCode from 'react-native-qrcode-svg';
+import { useApp } from '../src/context/AppContext';
+import { bridge } from '../src/services/CommunicationBridge';
+import { QRItem, SlideItem } from '../src/types';
+
+const { width } = Dimensions.get('window');
+
+type ControlState = 'scan' | 'manual' | 'connected';
+type Tab = 'qr' | 'slides';
+
+export default function ControlScreen() {
+  const { setMode, isConnected, setConnected, content, addQRItem, addSlideItem, removeQRItem, removeSlideItem } = useApp();
+  const [permission, requestPermission] = useCameraPermissions();
+  const [controlState, setControlState] = useState<ControlState>('scan');
+  const [activeTab, setActiveTab] = useState<Tab>('qr');
+  const [pinInput, setPinInput] = useState('');
+  const [scanned, setScanned] = useState(false);
+
+  // QR creation form
+  const [qrName, setQrName] = useState('');
+  const [qrUrl, setQrUrl] = useState('');
+
+  // Slide creation
+  const [slideName, setSlideName] = useState('');
+
+  useEffect(() => {
+    setMode('control');
+
+    // Handle messages from TV
+    bridge.onControlMessage((data) => {
+      handleMessage(data);
+    });
+
+    bridge.onControlConnection((connected) => {
+      setConnected(connected);
+      if (connected) {
+        setControlState('connected');
+      } else {
+        setControlState('scan');
+      }
+    });
+
+    return () => {
+      bridge.disconnectControl();
+    };
+  }, []);
+
+  const handleMessage = (data: any) => {
+    switch (data.type) {
+      case 'auth_success':
+        Alert.alert('Conectado', 'Conexión establecida con el TV');
+        setConnected(true);
+        setControlState('connected');
+        break;
+      case 'auth_failed':
+        Alert.alert('Error', data.message || 'Error de autenticación');
+        setConnected(false);
+        setControlState('scan');
+        setScanned(false);
+        break;
+    }
+  };
+
+  const handleBarCodeScanned = ({ data }: { data: string }) => {
+    if (scanned) return;
+    setScanned(true);
+
+    // Parse the QR code: tdsqr://IP:PORT/PIN
+    const match = data.match(/tdsqr:\/\/([^:]+):(\d+)\/(\d+)/);
+    if (match) {
+      const pin = match[3];
+      connectWithPIN(pin);
+    } else {
+      Alert.alert('Error', 'Código QR no válido');
+      setScanned(false);
+    }
+  };
+
+  const connectWithPIN = (pin: string) => {
+    const success = bridge.connectToTV(pin);
+    if (!success) {
+      // Message will be handled by bridge callback
+    }
+  };
+
+  const handleManualConnect = () => {
+    if (!pinInput || pinInput.length !== 6) {
+      Alert.alert('Error', 'Ingresa un PIN de 6 dígitos');
+      return;
+    }
+
+    connectWithPIN(pinInput);
+  };
+
+  const handleAddQR = () => {
+    if (!qrName || !qrUrl) {
+      Alert.alert('Error', 'Ingresa nombre y URL');
+      return;
+    }
+
+    const newQR: QRItem = {
+      id: Date.now().toString(),
+      name: qrName,
+      url: qrUrl.startsWith('http') ? qrUrl : `https://${qrUrl}`,
+      createdAt: Date.now(),
+    };
+
+    addQRItem(newQR);
+    syncContent([...content.qrItems, newQR], content.slideItems);
+    setQrName('');
+    setQrUrl('');
+  };
+
+  const handlePickImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [16, 9],
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      const newSlide: SlideItem = {
+        id: Date.now().toString(),
+        name: slideName || `Slide ${content.slideItems.length + 1}`,
+        imageUri: result.assets[0].uri,
+        createdAt: Date.now(),
+      };
+
+      addSlideItem(newSlide);
+      syncContent(content.qrItems, [...content.slideItems, newSlide]);
+      setSlideName('');
+    }
+  };
+
+  const syncContent = (qrItems: QRItem[], slideItems: SlideItem[]) => {
+    bridge.sendToTV({
+      type: 'content_update',
+      qrItems,
+      slideItems,
+    });
+  };
+
+  const handleRemoveQR = (id: string) => {
+    removeQRItem(id);
+    const updatedQRs = content.qrItems.filter((item) => item.id !== id);
+    syncContent(updatedQRs, content.slideItems);
+  };
+
+  const handleRemoveSlide = (id: string) => {
+    removeSlideItem(id);
+    const updatedSlides = content.slideItems.filter((item) => item.id !== id);
+    syncContent(content.qrItems, updatedSlides);
+  };
+
+  const handleStartPresentation = () => {
+    if (content.qrItems.length === 0 && content.slideItems.length === 0) {
+      Alert.alert('Sin contenido', 'Añade al menos un QR o imagen para iniciar');
+      return;
+    }
+    bridge.sendToTV({ type: 'start_presentation' });
+  };
+
+  const handleStopPresentation = () => {
+    bridge.sendToTV({ type: 'stop_presentation' });
+  };
+
+  // Connection screens
+  if (controlState === 'scan') {
+    if (!permission) {
+      return (
+        <SafeAreaView style={styles.container}>
+          <Text style={styles.text}>Cargando...</Text>
+        </SafeAreaView>
+      );
+    }
+
+    if (!permission.granted) {
+      return (
+        <SafeAreaView style={styles.container}>
+          <View style={styles.permissionContainer}>
+            <Text style={styles.title}>Permiso de Cámara</Text>
+            <Text style={styles.subtitle}>
+              Necesitamos acceso a la cámara para escanear el código QR del TV
+            </Text>
+            <TouchableOpacity style={styles.primaryButton} onPress={requestPermission}>
+              <Text style={styles.primaryButtonText}>Permitir Cámara</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={() => setControlState('manual')}
+            >
+              <Text style={styles.secondaryButtonText}>Ingresar manualmente</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      );
+    }
+
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.logo}>TDS QR</Text>
+          <Text style={styles.headerSubtitle}>Modo Control</Text>
+        </View>
+
+        <View style={styles.scannerContainer}>
+          <CameraView
+            style={styles.scanner}
+            barcodeScannerSettings={{
+              barcodeTypes: ['qr'],
+            }}
+            onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+          />
+          <View style={styles.scannerOverlay}>
+            <View style={styles.scannerFrame} />
+          </View>
+        </View>
+
+        <Text style={styles.scanInstruction}>
+          Escanea el código QR que aparece en el TV
+        </Text>
+
+        <TouchableOpacity
+          style={styles.manualButton}
+          onPress={() => setControlState('manual')}
+        >
+          <Text style={styles.manualButtonText}>Ingresar PIN manualmente</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
+  if (controlState === 'manual') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.logo}>TDS QR</Text>
+          <Text style={styles.headerSubtitle}>Conexión Manual</Text>
+        </View>
+
+        <View style={styles.manualForm}>
+          <Text style={styles.inputLabel}>PIN del TV</Text>
+          <TextInput
+            style={styles.pinInput}
+            placeholder="000000"
+            placeholderTextColor="#666666"
+            value={pinInput}
+            onChangeText={setPinInput}
+            keyboardType="number-pad"
+            maxLength={6}
+            textAlign="center"
+          />
+          <Text style={styles.pinHint}>
+            Ingresa el PIN de 6 dígitos que aparece en el TV
+          </Text>
+
+          <TouchableOpacity style={styles.primaryButton} onPress={handleManualConnect}>
+            <Text style={styles.primaryButtonText}>Conectar</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={() => {
+              setControlState('scan');
+              setScanned(false);
+            }}
+          >
+            <Text style={styles.secondaryButtonText}>Volver a escanear QR</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Connected state - Content management
+  return (
+    <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.logo}>TDS QR</Text>
+        <View style={styles.connectedBadge}>
+          <View style={styles.connectedDot} />
+          <Text style={styles.connectedText}>Conectado</Text>
+        </View>
+      </View>
+
+      <View style={styles.tabs}>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'qr' && styles.tabActive]}
+          onPress={() => setActiveTab('qr')}
+        >
+          <Text style={[styles.tabText, activeTab === 'qr' && styles.tabTextActive]}>
+            Códigos QR
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'slides' && styles.tabActive]}
+          onPress={() => setActiveTab('slides')}
+        >
+          <Text style={[styles.tabText, activeTab === 'slides' && styles.tabTextActive]}>
+            Imágenes
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
+        {activeTab === 'qr' ? (
+          <View style={styles.tabContent}>
+            <View style={styles.form}>
+              <TextInput
+                style={styles.input}
+                placeholder="Nombre del QR"
+                placeholderTextColor="#666666"
+                value={qrName}
+                onChangeText={setQrName}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="URL (ej: google.com)"
+                placeholderTextColor="#666666"
+                value={qrUrl}
+                onChangeText={setQrUrl}
+                autoCapitalize="none"
+                keyboardType="url"
+              />
+              <TouchableOpacity style={styles.addButton} onPress={handleAddQR}>
+                <Text style={styles.addButtonText}>+ Añadir QR</Text>
+              </TouchableOpacity>
+            </View>
+
+            {content.qrItems.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyStateText}>No hay códigos QR</Text>
+                <Text style={styles.emptyStateHint}>Añade un QR con el formulario de arriba</Text>
+              </View>
+            ) : (
+              <View style={styles.itemsList}>
+                {content.qrItems.map((item) => (
+                  <View key={item.id} style={styles.itemCard}>
+                    <View style={styles.itemQR}>
+                      <QRCode value={item.url} size={50} color="#000" backgroundColor="#FFF" />
+                    </View>
+                    <View style={styles.itemInfo}>
+                      <Text style={styles.itemName}>{item.name}</Text>
+                      <Text style={styles.itemUrl} numberOfLines={1}>
+                        {item.url}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.deleteButton}
+                      onPress={() => handleRemoveQR(item.id)}
+                    >
+                      <Text style={styles.deleteButtonText}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        ) : (
+          <View style={styles.tabContent}>
+            <View style={styles.form}>
+              <TextInput
+                style={styles.input}
+                placeholder="Nombre de la imagen (opcional)"
+                placeholderTextColor="#666666"
+                value={slideName}
+                onChangeText={setSlideName}
+              />
+              <TouchableOpacity style={styles.addButton} onPress={handlePickImage}>
+                <Text style={styles.addButtonText}>+ Seleccionar Imagen</Text>
+              </TouchableOpacity>
+            </View>
+
+            {content.slideItems.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyStateText}>No hay imágenes</Text>
+                <Text style={styles.emptyStateHint}>Selecciona una imagen de tu galería</Text>
+              </View>
+            ) : (
+              <View style={styles.itemsList}>
+                {content.slideItems.map((item) => (
+                  <View key={item.id} style={styles.itemCard}>
+                    <Image source={{ uri: item.imageUri }} style={styles.itemImage} />
+                    <View style={styles.itemInfo}>
+                      <Text style={styles.itemName}>{item.name}</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.deleteButton}
+                      onPress={() => handleRemoveSlide(item.id)}
+                    >
+                      <Text style={styles.deleteButtonText}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+      </ScrollView>
+
+      <View style={styles.controlBar}>
+        <Text style={styles.contentCount}>
+          {content.qrItems.length + content.slideItems.length} elementos
+        </Text>
+        <TouchableOpacity style={styles.startButton} onPress={handleStartPresentation}>
+          <Text style={styles.startButtonText}>Iniciar en TV</Text>
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#0A0A0F',
+  },
+  text: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+  },
+  logo: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#A855F7',
+  },
+  headerSubtitle: {
+    fontSize: 14,
+    color: '#9CA3AF',
+  },
+  permissionContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 40,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginBottom: 12,
+  },
+  subtitle: {
+    fontSize: 16,
+    color: '#9CA3AF',
+    textAlign: 'center',
+    marginBottom: 32,
+  },
+  primaryButton: {
+    backgroundColor: '#A855F7',
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderRadius: 12,
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  primaryButtonText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  secondaryButton: {
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+  },
+  secondaryButtonText: {
+    fontSize: 14,
+    color: '#C084FC',
+  },
+  scannerContainer: {
+    height: width * 0.8,
+    marginHorizontal: 20,
+    borderRadius: 16,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  scanner: {
+    flex: 1,
+  },
+  scannerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scannerFrame: {
+    width: width * 0.6,
+    height: width * 0.6,
+    borderWidth: 2,
+    borderColor: '#A855F7',
+    borderRadius: 16,
+  },
+  scanInstruction: {
+    fontSize: 16,
+    color: '#9CA3AF',
+    textAlign: 'center',
+    marginTop: 24,
+    marginBottom: 16,
+  },
+  manualButton: {
+    padding: 16,
+  },
+  manualButtonText: {
+    fontSize: 14,
+    color: '#C084FC',
+    textAlign: 'center',
+  },
+  manualForm: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  inputLabel: {
+    fontSize: 14,
+    color: '#9CA3AF',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  input: {
+    backgroundColor: '#16161F',
+    borderWidth: 1,
+    borderColor: '#2D2D3A',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: '#FFFFFF',
+    marginBottom: 16,
+  },
+  pinInput: {
+    backgroundColor: '#16161F',
+    borderWidth: 1,
+    borderColor: '#2D2D3A',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 20,
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#A855F7',
+    marginBottom: 8,
+    letterSpacing: 8,
+  },
+  pinHint: {
+    fontSize: 12,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  connectedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(168, 85, 247, 0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  connectedDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#A855F7',
+    marginRight: 6,
+  },
+  connectedText: {
+    fontSize: 12,
+    color: '#C084FC',
+  },
+  tabs: {
+    flexDirection: 'row',
+    marginHorizontal: 20,
+    marginBottom: 16,
+    backgroundColor: '#16161F',
+    borderRadius: 12,
+    padding: 4,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderRadius: 10,
+  },
+  tabActive: {
+    backgroundColor: '#A855F7',
+  },
+  tabText: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  tabTextActive: {
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+  },
+  content: {
+    flex: 1,
+  },
+  contentContainer: {
+    paddingBottom: 20,
+  },
+  tabContent: {
+    paddingHorizontal: 20,
+  },
+  form: {
+    marginBottom: 24,
+  },
+  addButton: {
+    backgroundColor: '#16161F',
+    borderWidth: 1,
+    borderColor: '#A855F7',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  addButtonText: {
+    fontSize: 16,
+    color: '#A855F7',
+    fontWeight: 'bold',
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyStateText: {
+    fontSize: 16,
+    color: '#6B7280',
+    marginBottom: 8,
+  },
+  emptyStateHint: {
+    fontSize: 14,
+    color: '#4B5563',
+  },
+  itemsList: {
+    gap: 12,
+  },
+  itemCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#16161F',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#2D2D3A',
+  },
+  itemQR: {
+    width: 50,
+    height: 50,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  itemImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 8,
+  },
+  itemInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  itemName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginBottom: 4,
+  },
+  itemUrl: {
+    fontSize: 12,
+    color: '#9CA3AF',
+  },
+  deleteButton: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  deleteButtonText: {
+    fontSize: 18,
+    color: '#6B7280',
+  },
+  controlBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#2D2D3A',
+  },
+  contentCount: {
+    fontSize: 14,
+    color: '#9CA3AF',
+  },
+  startButton: {
+    backgroundColor: '#A855F7',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+  },
+  startButtonText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+});
