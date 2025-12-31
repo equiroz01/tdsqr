@@ -2,19 +2,30 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useTranslation } from '../src/i18n';
 
 export default function ModeSelectScreen() {
   const router = useRouter();
+  const { t } = useTranslation();
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.logo}>TDS QR</Text>
-        <Text style={styles.subtitle}>TV Display Slides + QR</Text>
+        <View style={styles.headerLeft} />
+        <View style={styles.headerCenter}>
+          <Text style={styles.logo}>{t('appName')}</Text>
+          <Text style={styles.subtitle}>{t('appSubtitle')}</Text>
+        </View>
+        <TouchableOpacity
+          style={styles.settingsButton}
+          onPress={() => router.push('/settings')}
+        >
+          <Text style={styles.settingsIcon}>⚙️</Text>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.content}>
-        <Text style={styles.question}>Como vas a usar este dispositivo?</Text>
+        <Text style={styles.question}>{t('modeQuestion')}</Text>
 
         <TouchableOpacity
           style={styles.modeButton}
@@ -23,9 +34,9 @@ export default function ModeSelectScreen() {
         >
           <Text style={styles.modeIcon}>📺</Text>
           <View style={styles.modeInfo}>
-            <Text style={styles.modeTitle}>Modo TV / Display</Text>
+            <Text style={styles.modeTitle}>{t('tvMode')}</Text>
             <Text style={styles.modeDescription}>
-              Muestra contenido en pantalla completa. Ideal para televisores y pantallas comerciales.
+              {t('tvModeDescription')}
             </Text>
           </View>
         </TouchableOpacity>
@@ -37,9 +48,9 @@ export default function ModeSelectScreen() {
         >
           <Text style={styles.modeIcon}>📱</Text>
           <View style={styles.modeInfo}>
-            <Text style={styles.modeTitle}>Modo Control</Text>
+            <Text style={styles.modeTitle}>{t('controlMode')}</Text>
             <Text style={styles.modeDescription}>
-              Administra y envia contenido a un TV conectado. Crea QRs y sube imagenes.
+              {t('controlModeDescription')}
             </Text>
           </View>
         </TouchableOpacity>
@@ -47,7 +58,7 @@ export default function ModeSelectScreen() {
 
       <View style={styles.footer}>
         <Text style={styles.footerText}>
-          Ambos dispositivos deben estar en la misma red WiFi
+          {t('networkWarning')}
         </Text>
       </View>
     </SafeAreaView>
@@ -60,8 +71,26 @@ const styles = StyleSheet.create({
     backgroundColor: '#0A0A0F',
   },
   header: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingVertical: 40,
+    paddingHorizontal: 20,
+  },
+  headerLeft: {
+    width: 44,
+  },
+  headerCenter: {
+    alignItems: 'center',
+  },
+  settingsButton: {
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  settingsIcon: {
+    fontSize: 24,
   },
   logo: {
     fontSize: 42,

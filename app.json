@@ -14,7 +14,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.equiroz.tdsqr"
+      "bundleIdentifier": "com.equiroz.tdsqr",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -35,7 +38,13 @@
       "expo-screen-orientation",
       "expo-asset",
       "expo-font",
-      "expo-barcode-scanner"
+      "expo-localization",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera"
+        }
+      ]
     ],
     "newArchEnabled": false,
     "experiments": {

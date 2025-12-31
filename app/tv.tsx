@@ -6,6 +6,7 @@ import { useApp } from '../src/context/AppContext';
 import { getLocalIP, generatePIN, PORT } from '../src/services/NetworkService';
 import { bridge } from '../src/services/CommunicationBridge';
 import { QRItem, SlideItem } from '../src/types';
+import { useTranslation } from '../src/i18n';
 
 const { width, height } = Dimensions.get('window');
 
@@ -13,6 +14,7 @@ type TVState = 'loading' | 'waiting' | 'connected' | 'presenting';
 
 export default function TVScreen() {
   const { setMode, setConnected, setConnectionInfo, content, setContent } = useApp();
+  const { t } = useTranslation();
   const [tvState, setTVState] = useState<TVState>('loading');
   const [localIP, setLocalIP] = useState<string>('');
   const [pin, setPin] = useState<string>('');
@@ -69,7 +71,7 @@ export default function TVScreen() {
       // Even if we can't get IP, still show waiting screen
       const generatedPin = generatePIN();
       setPin(generatedPin);
-      setLocalIP('No disponible');
+      setLocalIP(t('notAvailable'));
       bridge.initializeTV(generatedPin);
       setTVState('waiting');
     }
@@ -138,7 +140,7 @@ export default function TVScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <ActivityIndicator size="large" color="#00FFC3" />
-        <Text style={styles.loadingText}>Iniciando servidor...</Text>
+        <Text style={styles.loadingText}>{t('startingServer')}</Text>
       </SafeAreaView>
     );
   }
@@ -147,8 +149,8 @@ export default function TVScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.waitingContainer}>
-          <Text style={styles.logo}>TDS QR</Text>
-          <Text style={styles.title}>Modo TV</Text>
+          <Text style={styles.logo}>{t('appName')}</Text>
+          <Text style={styles.title}>{t('tvModeTitle')}</Text>
 
           <View style={styles.qrContainer}>
             <QRCode
@@ -160,28 +162,28 @@ export default function TVScreen() {
           </View>
 
           <Text style={styles.instruction}>
-            Escanea el código QR con la app en modo Control
+            {t('scanQRInstruction')}
           </Text>
 
           <View style={styles.divider}>
             <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>o usa el PIN</Text>
+            <Text style={styles.dividerText}>{t('orUsePin')}</Text>
             <View style={styles.dividerLine} />
           </View>
 
           <View style={styles.pinContainer}>
-            <Text style={styles.pinLabel}>PIN de conexión</Text>
+            <Text style={styles.pinLabel}>{t('connectionPin')}</Text>
             <Text style={styles.pin}>{pin}</Text>
           </View>
 
           <View style={styles.infoContainer}>
-            <Text style={styles.infoLabel}>IP del servidor</Text>
+            <Text style={styles.infoLabel}>{t('serverIP')}</Text>
             <Text style={styles.infoValue}>{localIP}:{PORT}</Text>
           </View>
 
           <View style={styles.statusContainer}>
             <View style={styles.statusDot} />
-            <Text style={styles.statusText}>Esperando conexión...</Text>
+            <Text style={styles.statusText}>{t('waitingConnection')}</Text>
           </View>
         </View>
       </SafeAreaView>
@@ -193,12 +195,12 @@ export default function TVScreen() {
       <SafeAreaView style={styles.container}>
         <View style={styles.connectedContainer}>
           <Text style={styles.connectedIcon}>✓</Text>
-          <Text style={styles.connectedTitle}>Conectado</Text>
+          <Text style={styles.connectedTitle}>{t('connected')}</Text>
           <Text style={styles.connectedSubtitle}>
-            Esperando contenido del dispositivo de control...
+            {t('waitingContent')}
           </Text>
           <Text style={styles.connectedHint}>
-            Añade QR codes o imágenes desde tu teléfono
+            {t('addContentHint')}
           </Text>
         </View>
       </SafeAreaView>
@@ -210,9 +212,9 @@ export default function TVScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.connectedContainer}>
-          <Text style={styles.connectedTitle}>Sin contenido</Text>
+          <Text style={styles.connectedTitle}>{t('noContent')}</Text>
           <Text style={styles.connectedSubtitle}>
-            Añade QR codes o imágenes desde el modo Control
+            {t('noContentHint')}
           </Text>
         </View>
       </SafeAreaView>

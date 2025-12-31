@@ -17,6 +17,7 @@ import QRCode from 'react-native-qrcode-svg';
 import { useApp } from '../src/context/AppContext';
 import { bridge } from '../src/services/CommunicationBridge';
 import { QRItem, SlideItem } from '../src/types';
+import { useTranslation } from '../src/i18n';
 
 const { width } = Dimensions.get('window');
 
@@ -25,6 +26,7 @@ type Tab = 'qr' | 'slides';
 
 export default function ControlScreen() {
   const { setMode, isConnected, setConnected, content, addQRItem, addSlideItem, removeQRItem, removeSlideItem } = useApp();
+  const { t } = useTranslation();
   const [permission, requestPermission] = useCameraPermissions();
   const [controlState, setControlState] = useState<ControlState>('scan');
   const [activeTab, setActiveTab] = useState<Tab>('qr');
@@ -63,12 +65,12 @@ export default function ControlScreen() {
   const handleMessage = (data: any) => {
     switch (data.type) {
       case 'auth_success':
-        Alert.alert('Conectado', 'Conexión establecida con el TV');
+        Alert.alert(t('connected'), t('connectionSuccess'));
         setConnected(true);
         setControlState('connected');
         break;
       case 'auth_failed':
-        Alert.alert('Error', data.message || 'Error de autenticación');
+        Alert.alert(t('error'), data.message || t('authError'));
         setConnected(false);
         setControlState('scan');
         setScanned(false);
@@ -86,7 +88,7 @@ export default function ControlScreen() {
       const pin = match[3];
       connectWithPIN(pin);
     } else {
-      Alert.alert('Error', 'Código QR no válido');
+      Alert.alert(t('error'), t('invalidQR'));
       setScanned(false);
     }
   };
@@ -100,7 +102,7 @@ export default function ControlScreen() {
 
   const handleManualConnect = () => {
     if (!pinInput || pinInput.length !== 6) {
-      Alert.alert('Error', 'Ingresa un PIN de 6 dígitos');
+      Alert.alert(t('error'), t('invalidPin'));
       return;
     }
 
@@ -109,7 +111,7 @@ export default function ControlScreen() {
 
   const handleAddQR = () => {
     if (!qrName || !qrUrl) {
-      Alert.alert('Error', 'Ingresa nombre y URL');
+      Alert.alert(t('error'), t('enterNameAndUrl'));
       return;
     }
 
@@ -170,7 +172,7 @@ export default function ControlScreen() {
 
   const handleStartPresentation = () => {
     if (content.qrItems.length === 0 && content.slideItems.length === 0) {
-      Alert.alert('Sin contenido', 'Añade al menos un QR o imagen para iniciar');
+      Alert.alert(t('noContent'), t('noContentToStart'));
       return;
     }
     bridge.sendToTV({ type: 'start_presentation' });
@@ -185,7 +187,7 @@ export default function ControlScreen() {
     if (!permission) {
       return (
         <SafeAreaView style={styles.container}>
-          <Text style={styles.text}>Cargando...</Text>
+          <Text style={styles.text}>{t('loading')}</Text>
         </SafeAreaView>
       );
     }
@@ -194,18 +196,18 @@ export default function ControlScreen() {
       return (
         <SafeAreaView style={styles.container}>
           <View style={styles.permissionContainer}>
-            <Text style={styles.title}>Permiso de Cámara</Text>
+            <Text style={styles.title}>{t('cameraPermission')}</Text>
             <Text style={styles.subtitle}>
-              Necesitamos acceso a la cámara para escanear el código QR del TV
+              {t('cameraPermissionDesc')}
             </Text>
             <TouchableOpacity style={styles.primaryButton} onPress={requestPermission}>
-              <Text style={styles.primaryButtonText}>Permitir Cámara</Text>
+              <Text style={styles.primaryButtonText}>{t('allowCamera')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.secondaryButton}
               onPress={() => setControlState('manual')}
             >
-              <Text style={styles.secondaryButtonText}>Ingresar manualmente</Text>
+              <Text style={styles.secondaryButtonText}>{t('enterManually')}</Text>
             </TouchableOpacity>
           </View>
         </SafeAreaView>
@@ -215,8 +217,8 @@ export default function ControlScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.logo}>TDS QR</Text>
-          <Text style={styles.headerSubtitle}>Modo Control</Text>
+          <Text style={styles.logo}>{t('appName')}</Text>
+          <Text style={styles.headerSubtitle}>{t('controlModeTitle')}</Text>
         </View>
 
         <View style={styles.scannerContainer}>
@@ -233,14 +235,14 @@ export default function ControlScreen() {
         </View>
 
         <Text style={styles.scanInstruction}>
-          Escanea el código QR que aparece en el TV
+          {t('scanTVQR')}
         </Text>
 
         <TouchableOpacity
           style={styles.manualButton}
           onPress={() => setControlState('manual')}
         >
-          <Text style={styles.manualButtonText}>Ingresar PIN manualmente</Text>
+          <Text style={styles.manualButtonText}>{t('enterPinManually')}</Text>
         </TouchableOpacity>
       </SafeAreaView>
     );
@@ -250,12 +252,12 @@ export default function ControlScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.logo}>TDS QR</Text>
-          <Text style={styles.headerSubtitle}>Conexión Manual</Text>
+          <Text style={styles.logo}>{t('appName')}</Text>
+          <Text style={styles.headerSubtitle}>{t('manualConnection')}</Text>
         </View>
 
         <View style={styles.manualForm}>
-          <Text style={styles.inputLabel}>PIN del TV</Text>
+          <Text style={styles.inputLabel}>{t('tvPin')}</Text>
           <TextInput
             style={styles.pinInput}
             placeholder="000000"
@@ -267,11 +269,11 @@ export default function ControlScreen() {
             textAlign="center"
           />
           <Text style={styles.pinHint}>
-            Ingresa el PIN de 6 dígitos que aparece en el TV
+            {t('pinHint')}
           </Text>
 
           <TouchableOpacity style={styles.primaryButton} onPress={handleManualConnect}>
-            <Text style={styles.primaryButtonText}>Conectar</Text>
+            <Text style={styles.primaryButtonText}>{t('connect')}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -281,7 +283,7 @@ export default function ControlScreen() {
               setScanned(false);
             }}
           >
-            <Text style={styles.secondaryButtonText}>Volver a escanear QR</Text>
+            <Text style={styles.secondaryButtonText}>{t('backToScan')}</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -292,10 +294,10 @@ export default function ControlScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.logo}>TDS QR</Text>
+        <Text style={styles.logo}>{t('appName')}</Text>
         <View style={styles.connectedBadge}>
           <View style={styles.connectedDot} />
-          <Text style={styles.connectedText}>Conectado</Text>
+          <Text style={styles.connectedText}>{t('connected')}</Text>
         </View>
       </View>
 
@@ -305,7 +307,7 @@ export default function ControlScreen() {
           onPress={() => setActiveTab('qr')}
         >
           <Text style={[styles.tabText, activeTab === 'qr' && styles.tabTextActive]}>
-            Códigos QR
+            {t('qrCodes')}
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -313,7 +315,7 @@ export default function ControlScreen() {
           onPress={() => setActiveTab('slides')}
         >
           <Text style={[styles.tabText, activeTab === 'slides' && styles.tabTextActive]}>
-            Imágenes
+            {t('images')}
           </Text>
         </TouchableOpacity>
       </View>
@@ -324,14 +326,14 @@ export default function ControlScreen() {
             <View style={styles.form}>
               <TextInput
                 style={styles.input}
-                placeholder="Nombre del QR"
+                placeholder={t('qrName')}
                 placeholderTextColor="#666666"
                 value={qrName}
                 onChangeText={setQrName}
               />
               <TextInput
                 style={styles.input}
-                placeholder="URL (ej: google.com)"
+                placeholder={t('qrUrl')}
                 placeholderTextColor="#666666"
                 value={qrUrl}
                 onChangeText={setQrUrl}
@@ -339,14 +341,14 @@ export default function ControlScreen() {
                 keyboardType="url"
               />
               <TouchableOpacity style={styles.addButton} onPress={handleAddQR}>
-                <Text style={styles.addButtonText}>+ Añadir QR</Text>
+                <Text style={styles.addButtonText}>{t('addQR')}</Text>
               </TouchableOpacity>
             </View>
 
             {content.qrItems.length === 0 ? (
               <View style={styles.emptyState}>
-                <Text style={styles.emptyStateText}>No hay códigos QR</Text>
-                <Text style={styles.emptyStateHint}>Añade un QR con el formulario de arriba</Text>
+                <Text style={styles.emptyStateText}>{t('noQRCodes')}</Text>
+                <Text style={styles.emptyStateHint}>{t('addQRHint')}</Text>
               </View>
             ) : (
               <View style={styles.itemsList}>
@@ -377,20 +379,20 @@ export default function ControlScreen() {
             <View style={styles.form}>
               <TextInput
                 style={styles.input}
-                placeholder="Nombre de la imagen (opcional)"
+                placeholder={t('imageName')}
                 placeholderTextColor="#666666"
                 value={slideName}
                 onChangeText={setSlideName}
               />
               <TouchableOpacity style={styles.addButton} onPress={handlePickImage}>
-                <Text style={styles.addButtonText}>+ Seleccionar Imagen</Text>
+                <Text style={styles.addButtonText}>{t('selectImage')}</Text>
               </TouchableOpacity>
             </View>
 
             {content.slideItems.length === 0 ? (
               <View style={styles.emptyState}>
-                <Text style={styles.emptyStateText}>No hay imágenes</Text>
-                <Text style={styles.emptyStateHint}>Selecciona una imagen de tu galería</Text>
+                <Text style={styles.emptyStateText}>{t('noImages')}</Text>
+                <Text style={styles.emptyStateHint}>{t('selectImageHint')}</Text>
               </View>
             ) : (
               <View style={styles.itemsList}>
@@ -416,10 +418,10 @@ export default function ControlScreen() {
 
       <View style={styles.controlBar}>
         <Text style={styles.contentCount}>
-          {content.qrItems.length + content.slideItems.length} elementos
+          {content.qrItems.length + content.slideItems.length} {t('elements')}
         </Text>
         <TouchableOpacity style={styles.startButton} onPress={handleStartPresentation}>
-          <Text style={styles.startButtonText}>Iniciar en TV</Text>
+          <Text style={styles.startButtonText}>{t('startOnTV')}</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
