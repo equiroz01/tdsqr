@@ -9,13 +9,14 @@ import {
   Alert,
   Image,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import QRCode from 'react-native-qrcode-svg';
 import { useApp } from '../src/context/AppContext';
-import { bridge } from '../src/services/CommunicationBridge';
+import { controlClient } from '../src/services/TCPCommunication';
 import { QRItem, SlideItem } from '../src/types';
 import { useTranslation } from '../src/i18n';
 
@@ -31,7 +32,9 @@ export default function ControlScreen() {
   const [controlState, setControlState] = useState<ControlState>('scan');
   const [activeTab, setActiveTab] = useState<Tab>('qr');
   const [pinInput, setPinInput] = useState('');
+  const [ipInput, setIpInput] = useState('');
   const [scanned, setScanned] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
 
   // QR creation form
   const [qrName, setQrName] = useState('');
@@ -44,32 +47,35 @@ export default function ControlScreen() {
     setMode('control');
 
     // Handle messages from TV
-    bridge.onControlMessage((data) => {
+    controlClient.onMessage((data) => {
       handleMessage(data);
     });
 
-    bridge.onControlConnection((connected) => {
+    controlClient.onConnection((connected) => {
       setConnected(connected);
       if (connected) {
         setControlState('connected');
       } else {
         setControlState('scan');
+        setIsConnecting(false);
       }
     });
 
     return () => {
-      bridge.disconnectControl();
+      controlClient.disconnect();
     };
   }, []);
 
   const handleMessage = (data: any) => {
     switch (data.type) {
       case 'auth_success':
+        setIsConnecting(false);
         Alert.alert(t('connected'), t('connectionSuccess'));
         setConnected(true);
         setControlState('connected');
         break;
       case 'auth_failed':
+        setIsConnecting(false);
         Alert.alert(t('error'), data.message || t('authError'));
         setConnected(false);
         setControlState('scan');
@@ -85,28 +91,44 @@ export default function ControlScreen() {
     // Parse the QR code: tdsqr://IP:PORT/PIN
     const match = data.match(/tdsqr:\/\/([^:]+):(\d+)\/(\d+)/);
     if (match) {
+      const ip = match[1];
       const pin = match[3];
-      connectWithPIN(pin);
+      connectToTV(ip, pin);
     } else {
       Alert.alert(t('error'), t('invalidQR'));
       setScanned(false);
     }
   };
 
-  const connectWithPIN = (pin: string) => {
-    const success = bridge.connectToTV(pin);
-    if (!success) {
-      // Message will be handled by bridge callback
+  const connectToTV = async (ip: string, pin: string) => {
+    setIsConnecting(true);
+    try {
+      console.log('[Control] Connecting to TV at', ip, 'with PIN', pin);
+      const success = await controlClient.connect(ip, pin);
+      if (!success) {
+        setIsConnecting(false);
+        Alert.alert(t('error'), t('connectionFailed'));
+        setScanned(false);
+      }
+    } catch (error: any) {
+      setIsConnecting(false);
+      console.error('[Control] Connection error:', error);
+      Alert.alert(t('error'), error.message || t('connectionFailed'));
+      setScanned(false);
     }
   };
 
   const handleManualConnect = () => {
+    if (!ipInput) {
+      Alert.alert(t('error'), t('enterIP'));
+      return;
+    }
     if (!pinInput || pinInput.length !== 6) {
       Alert.alert(t('error'), t('invalidPin'));
       return;
     }
 
-    connectWithPIN(pinInput);
+    connectToTV(ipInput, pinInput);
   };
 
   const handleAddQR = () => {
@@ -151,7 +173,7 @@ export default function ControlScreen() {
   };
 
   const syncContent = (qrItems: QRItem[], slideItems: SlideItem[]) => {
-    bridge.sendToTV({
+    controlClient.send({
       type: 'content_update',
       qrItems,
       slideItems,
@@ -175,11 +197,11 @@ export default function ControlScreen() {
       Alert.alert(t('noContent'), t('noContentToStart'));
       return;
     }
-    bridge.sendToTV({ type: 'start_presentation' });
+    controlClient.send({ type: 'start_presentation' });
   };
 
   const handleStopPresentation = () => {
-    bridge.sendToTV({ type: 'stop_presentation' });
+    controlClient.send({ type: 'stop_presentation' });
   };
 
   // Connection screens
@@ -257,6 +279,17 @@ export default function ControlScreen() {
         </View>
 
         <View style={styles.manualForm}>
+          <Text style={styles.inputLabel}>{t('serverIP')}</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="192.168.1.100"
+            placeholderTextColor="#666666"
+            value={ipInput}
+            onChangeText={setIpInput}
+            keyboardType="numeric"
+            autoCapitalize="none"
+          />
+
           <Text style={styles.inputLabel}>{t('tvPin')}</Text>
           <TextInput
             style={styles.pinInput}
@@ -272,8 +305,16 @@ export default function ControlScreen() {
             {t('pinHint')}
           </Text>
 
-          <TouchableOpacity style={styles.primaryButton} onPress={handleManualConnect}>
-            <Text style={styles.primaryButtonText}>{t('connect')}</Text>
+          <TouchableOpacity
+            style={[styles.primaryButton, isConnecting && styles.primaryButtonDisabled]}
+            onPress={handleManualConnect}
+            disabled={isConnecting}
+          >
+            {isConnecting ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.primaryButtonText}>{t('connect')}</Text>
+            )}
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -480,6 +521,9 @@ const styles = StyleSheet.create({
     width: '100%',
     alignItems: 'center',
     marginBottom: 16,
+  },
+  primaryButtonDisabled: {
+    opacity: 0.6,
   },
   primaryButtonText: {
     fontSize: 16,

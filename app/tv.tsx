@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, Dimensions, Image } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, Dimensions, Image, BackHandler } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
 import { useApp } from '../src/context/AppContext';
 import { getLocalIP, generatePIN, PORT } from '../src/services/NetworkService';
-import { bridge } from '../src/services/CommunicationBridge';
+import { tvServer } from '../src/services/TCPCommunication';
 import { QRItem, SlideItem } from '../src/types';
 import { useTranslation } from '../src/i18n';
 
@@ -19,6 +19,7 @@ export default function TVScreen() {
   const [localIP, setLocalIP] = useState<string>('');
   const [pin, setPin] = useState<string>('');
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
+  const [serverError, setServerError] = useState<string | null>(null);
   const [localContent, setLocalContent] = useState<{ qrItems: QRItem[]; slideItems: SlideItem[] }>({
     qrItems: [],
     slideItems: [],
@@ -29,28 +30,35 @@ export default function TVScreen() {
 
   useEffect(() => {
     setMode('tv');
+
+    // Prevent back button on TV (stay in TV mode)
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      return true; // Prevent going back
+    });
+
     initializeServer();
 
     return () => {
-      bridge.stopTV();
+      backHandler.remove();
+      tvServer.stop();
     };
   }, []);
 
   const initializeServer = async () => {
     try {
-      const ip = await getLocalIP();
       const generatedPin = generatePIN();
-
-      setLocalIP(ip);
       setPin(generatedPin);
+
+      console.log('[TV] Starting TCP server with PIN:', generatedPin);
+
+      // Start TCP server
+      const ip = await tvServer.start(generatedPin);
+      setLocalIP(ip);
       setConnectionInfo({ ip, pin: generatedPin });
 
-      // Initialize bridge with PIN
-      bridge.initializeTV(generatedPin);
-
       // Handle connection status
-      bridge.onTVConnection((connected) => {
-        console.log('Connection status:', connected);
+      tvServer.onConnection((connected) => {
+        console.log('[TV] Connection status:', connected);
         if (connected) {
           setConnected(true);
           setTVState('connected');
@@ -61,24 +69,33 @@ export default function TVScreen() {
       });
 
       // Handle incoming messages
-      bridge.onTVMessage((data) => {
+      tvServer.onMessage((data) => {
         handleMessage(data);
       });
 
       setTVState('waiting');
-    } catch (error) {
-      console.error('Failed to initialize server:', error);
-      // Even if we can't get IP, still show waiting screen
-      const generatedPin = generatePIN();
-      setPin(generatedPin);
-      setLocalIP(t('notAvailable'));
-      bridge.initializeTV(generatedPin);
-      setTVState('waiting');
+      setServerError(null);
+    } catch (error: any) {
+      console.error('[TV] Failed to initialize server:', error);
+      setServerError(error.message || 'Error starting server');
+
+      // Try to get IP anyway for display
+      try {
+        const ip = await getLocalIP();
+        setLocalIP(ip);
+      } catch (e) {
+        setLocalIP(t('notAvailable'));
+      }
+
+      // Retry after delay
+      setTimeout(() => {
+        initializeServer();
+      }, 5000);
     }
   };
 
   const handleMessage = useCallback((data: any) => {
-    console.log('TV received message:', data);
+    console.log('[TV] Received message:', data.type);
 
     switch (data.type) {
       case 'content_update':
@@ -139,8 +156,11 @@ export default function TVScreen() {
   if (tvState === 'loading') {
     return (
       <SafeAreaView style={styles.container}>
-        <ActivityIndicator size="large" color="#00FFC3" />
+        <ActivityIndicator size="large" color="#A855F7" />
         <Text style={styles.loadingText}>{t('startingServer')}</Text>
+        {serverError && (
+          <Text style={styles.errorText}>{serverError}</Text>
+        )}
       </SafeAreaView>
     );
   }
@@ -283,6 +303,13 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
     fontSize: 16,
     marginTop: 16,
+  },
+  errorText: {
+    color: '#EF4444',
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
+    paddingHorizontal: 20,
   },
   waitingContainer: {
     alignItems: 'center',

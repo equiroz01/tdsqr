@@ -51,6 +51,8 @@ export const translations = {
     backToScan: 'Volver a escanear QR',
     invalidQR: 'Código QR no válido',
     invalidPin: 'Ingresa un PIN de 6 dígitos',
+    enterIP: 'Ingresa la IP del servidor',
+    connectionFailed: 'No se pudo conectar al TV. Verifica la IP y el PIN.',
     connectionSuccess: 'Conexión establecida con el TV',
     authError: 'Error de autenticación',
 
@@ -131,6 +133,8 @@ export const translations = {
     backToScan: 'Back to scan QR',
     invalidQR: 'Invalid QR code',
     invalidPin: 'Enter a 6-digit PIN',
+    enterIP: 'Enter the server IP',
+    connectionFailed: 'Could not connect to TV. Check IP and PIN.',
     connectionSuccess: 'Connection established with TV',
     authError: 'Authentication error',
 
@@ -211,6 +215,8 @@ export const translations = {
     backToScan: 'Voltar para escanear QR',
     invalidQR: 'Código QR inválido',
     invalidPin: 'Digite um PIN de 6 dígitos',
+    enterIP: 'Digite o IP do servidor',
+    connectionFailed: 'Não foi possível conectar à TV. Verifique o IP e o PIN.',
     connectionSuccess: 'Conexão estabelecida com a TV',
     authError: 'Erro de autenticação',
 

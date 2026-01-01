@@ -1,13 +1,55 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTranslation } from '../src/i18n';
+import { isAndroidTV } from '../src/services/DeviceService';
 
 export default function ModeSelectScreen() {
   const router = useRouter();
   const { t } = useTranslation();
+  const [isTV, setIsTV] = useState<boolean | null>(null);
 
+  useEffect(() => {
+    // Check if running on Android TV
+    const checkDevice = () => {
+      const tvDevice = isAndroidTV();
+      setIsTV(tvDevice);
+
+      // If it's a TV, automatically redirect to TV mode
+      if (tvDevice) {
+        router.replace('/tv');
+      }
+    };
+
+    checkDevice();
+  }, []);
+
+  // Show loading while checking device type
+  if (isTV === null) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#A855F7" />
+          <Text style={styles.loadingText}>{t('loading')}</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // If it's a TV, show loading (will redirect)
+  if (isTV) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#A855F7" />
+          <Text style={styles.loadingText}>{t('loading')}</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Normal mode selection for mobile devices
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -69,6 +111,16 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0A0A0F',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#9CA3AF',
+    fontSize: 16,
+    marginTop: 16,
   },
   header: {
     flexDirection: 'row',
