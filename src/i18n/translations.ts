@@ -14,6 +14,7 @@ export const translations = {
     connect: 'Conectar',
     connected: 'Conectado',
     disconnect: 'Desconectar',
+    exit: 'Salir',
 
     // Mode Select Screen
     modeQuestion: '¿Cómo vas a usar este dispositivo?',
@@ -96,6 +97,7 @@ export const translations = {
     connect: 'Connect',
     connected: 'Connected',
     disconnect: 'Disconnect',
+    exit: 'Exit',
 
     // Mode Select Screen
     modeQuestion: 'How will you use this device?',
@@ -178,6 +180,7 @@ export const translations = {
     connect: 'Conectar',
     connected: 'Conectado',
     disconnect: 'Desconectar',
+    exit: 'Sair',
 
     // Mode Select Screen
     modeQuestion: 'Como você vai usar este dispositivo?',

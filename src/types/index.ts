@@ -9,6 +9,7 @@ export interface SlideItem {
   id: string;
   name: string;
   imageUri: string;
+  imageBase64?: string; // Base64 encoded image for network transfer
   createdAt: number;
 }
 

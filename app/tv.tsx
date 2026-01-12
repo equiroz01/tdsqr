@@ -1,12 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, Dimensions, Image, BackHandler } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, Dimensions, Image, BackHandler, TouchableOpacity, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import QRCode from 'react-native-qrcode-svg';
 import { useApp } from '../src/context/AppContext';
 import { getLocalIP, generatePIN, PORT } from '../src/services/NetworkService';
 import { tvServer } from '../src/services/TCPCommunication';
 import { QRItem, SlideItem } from '../src/types';
 import { useTranslation } from '../src/i18n';
+
+const TV_STORAGE_KEY = '@tdsqr/tv_content';
 
 const { width, height } = Dimensions.get('window');
 
@@ -15,6 +19,7 @@ type TVState = 'loading' | 'waiting' | 'connected' | 'presenting';
 export default function TVScreen() {
   const { setMode, setConnected, setConnectionInfo, content, setContent } = useApp();
   const { t } = useTranslation();
+  const router = useRouter();
   const [tvState, setTVState] = useState<TVState>('loading');
   const [localIP, setLocalIP] = useState<string>('');
   const [pin, setPin] = useState<string>('');
@@ -24,12 +29,62 @@ export default function TVScreen() {
     qrItems: [],
     slideItems: [],
   });
+  const [exitTapCount, setExitTapCount] = useState(0);
+  const [lastTapTime, setLastTapTime] = useState(0);
 
   // Combined content for presentation
   const allContent = [...localContent.qrItems, ...localContent.slideItems];
 
+  // Load saved content from storage
+  const loadSavedContent = async () => {
+    try {
+      const saved = await AsyncStorage.getItem(TV_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        setLocalContent(parsed);
+        setContent(parsed.qrItems || [], parsed.slideItems || []);
+        if ((parsed.qrItems?.length || 0) + (parsed.slideItems?.length || 0) > 0) {
+          return true; // Has content
+        }
+      }
+    } catch (error) {
+      console.error('[TV] Error loading saved content:', error);
+    }
+    return false;
+  };
+
+  // Save content to storage
+  const saveContentToStorage = async (qrItems: QRItem[], slideItems: SlideItem[]) => {
+    try {
+      await AsyncStorage.setItem(TV_STORAGE_KEY, JSON.stringify({ qrItems, slideItems }));
+    } catch (error) {
+      console.error('[TV] Error saving content:', error);
+    }
+  };
+
+  // Handle exit tap (5 taps in corner to exit)
+  const handleExitTap = () => {
+    const now = Date.now();
+    if (now - lastTapTime > 2000) {
+      // Reset if more than 2 seconds passed
+      setExitTapCount(1);
+    } else {
+      setExitTapCount((prev) => prev + 1);
+    }
+    setLastTapTime(now);
+
+    if (exitTapCount >= 4) {
+      // 5th tap
+      tvServer.stop();
+      router.replace('/');
+    }
+  };
+
   useEffect(() => {
     setMode('tv');
+
+    // Load saved content first
+    loadSavedContent();
 
     // Prevent back button on TV (stay in TV mode)
     const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -103,6 +158,8 @@ export default function TVScreen() {
         const newSlideItems = data.slideItems || [];
         setLocalContent({ qrItems: newQRItems, slideItems: newSlideItems });
         setContent(newQRItems, newSlideItems);
+        // Save content for persistence (works without connection)
+        saveContentToStorage(newQRItems, newSlideItems);
         if (newQRItems.length > 0 || newSlideItems.length > 0) {
           setTVState('presenting');
           setCurrentSlideIndex(0);
@@ -205,7 +262,13 @@ export default function TVScreen() {
             <View style={styles.statusDot} />
             <Text style={styles.statusText}>{t('waitingConnection')}</Text>
           </View>
+
+          <TouchableOpacity style={styles.exitButton} onPress={() => { tvServer.stop(); router.replace('/'); }}>
+            <Text style={styles.exitButtonText}>{t('exit') || 'Salir'}</Text>
+          </TouchableOpacity>
         </View>
+        {/* Exit tap zone - top left corner */}
+        <Pressable style={styles.exitZone} onPress={handleExitTap} />
       </SafeAreaView>
     );
   }
@@ -222,7 +285,13 @@ export default function TVScreen() {
           <Text style={styles.connectedHint}>
             {t('addContentHint')}
           </Text>
+
+          <TouchableOpacity style={styles.exitButton} onPress={() => { tvServer.stop(); router.replace('/'); }}>
+            <Text style={styles.exitButtonText}>{t('exit') || 'Salir'}</Text>
+          </TouchableOpacity>
         </View>
+        {/* Exit tap zone - top left corner */}
+        <Pressable style={styles.exitZone} onPress={handleExitTap} />
       </SafeAreaView>
     );
   }
@@ -237,6 +306,8 @@ export default function TVScreen() {
             {t('noContentHint')}
           </Text>
         </View>
+        {/* Exit tap zone - top left corner */}
+        <Pressable style={styles.exitZone} onPress={handleExitTap} />
       </SafeAreaView>
     );
   }
@@ -248,29 +319,22 @@ export default function TVScreen() {
     <View style={styles.presentationContainer}>
       {isQR ? (
         <View style={styles.qrSlide}>
-          <Text style={styles.qrSlideTitle}>{currentItem.name}</Text>
           <View style={styles.qrSlideCode}>
             <QRCode
               value={(currentItem as QRItem).url}
-              size={Math.min(width * 0.6, height * 0.5)}
+              size={Math.min(width * 0.7, height * 0.6)}
               color="#000000"
               backgroundColor="#FFFFFF"
             />
           </View>
-          <Text style={styles.qrSlideUrl}>{(currentItem as QRItem).url}</Text>
         </View>
       ) : (
         <View style={styles.imageSlide}>
           <Image
-            source={{ uri: (currentItem as SlideItem).imageUri }}
+            source={{ uri: (currentItem as SlideItem).imageBase64 || (currentItem as SlideItem).imageUri }}
             style={styles.slideImage}
             resizeMode="contain"
           />
-          {currentItem.name && (
-            <View style={styles.imageCaption}>
-              <Text style={styles.imageCaptionText}>{currentItem.name}</Text>
-            </View>
-          )}
         </View>
       )}
 
@@ -288,6 +352,9 @@ export default function TVScreen() {
           ))}
         </View>
       )}
+
+      {/* Exit tap zone - top left corner */}
+      <Pressable style={styles.exitZone} onPress={handleExitTap} />
     </View>
   );
 }
@@ -493,5 +560,25 @@ const styles = StyleSheet.create({
   indicatorActive: {
     backgroundColor: '#2DD4BF',
     width: 24,
+  },
+  exitButton: {
+    marginTop: 32,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderWidth: 1,
+    borderColor: '#4B5563',
+    borderRadius: 8,
+  },
+  exitButtonText: {
+    color: '#9CA3AF',
+    fontSize: 14,
+  },
+  exitZone: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: 80,
+    height: 80,
+    backgroundColor: 'transparent',
   },
 });

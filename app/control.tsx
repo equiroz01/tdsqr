@@ -14,11 +14,19 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import QRCode from 'react-native-qrcode-svg';
+import { useRouter } from 'expo-router';
 import { useApp } from '../src/context/AppContext';
 import { controlClient } from '../src/services/TCPCommunication';
 import { QRItem, SlideItem } from '../src/types';
 import { useTranslation } from '../src/i18n';
+
+const STORAGE_KEYS = {
+  QR_ITEMS: '@tdsqr/controller_qr_items',
+  SLIDE_ITEMS: '@tdsqr/controller_slide_items',
+};
 
 const { width } = Dimensions.get('window');
 
@@ -26,8 +34,9 @@ type ControlState = 'scan' | 'manual' | 'connected';
 type Tab = 'qr' | 'slides';
 
 export default function ControlScreen() {
-  const { setMode, isConnected, setConnected, content, addQRItem, addSlideItem, removeQRItem, removeSlideItem } = useApp();
+  const { setMode, isConnected, setConnected, content, addQRItem, addSlideItem, removeQRItem, removeSlideItem, clearContent } = useApp();
   const { t } = useTranslation();
+  const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
   const [controlState, setControlState] = useState<ControlState>('scan');
   const [activeTab, setActiveTab] = useState<Tab>('qr');
@@ -42,6 +51,47 @@ export default function ControlScreen() {
 
   // Slide creation
   const [slideName, setSlideName] = useState('');
+  const [isLoadingContent, setIsLoadingContent] = useState(true);
+
+  // Load saved content on mount
+  useEffect(() => {
+    loadSavedContent();
+  }, []);
+
+  const loadSavedContent = async () => {
+    try {
+      const [qrData, slideData] = await Promise.all([
+        AsyncStorage.getItem(STORAGE_KEYS.QR_ITEMS),
+        AsyncStorage.getItem(STORAGE_KEYS.SLIDE_ITEMS),
+      ]);
+
+      const savedQRs: QRItem[] = qrData ? JSON.parse(qrData) : [];
+      const savedSlides: SlideItem[] = slideData ? JSON.parse(slideData) : [];
+
+      // Load saved content into app state
+      for (const qr of savedQRs) {
+        addQRItem(qr);
+      }
+      for (const slide of savedSlides) {
+        addSlideItem(slide);
+      }
+    } catch (error) {
+      console.error('[Control] Error loading saved content:', error);
+    } finally {
+      setIsLoadingContent(false);
+    }
+  };
+
+  const saveContent = async (qrItems: QRItem[], slideItems: SlideItem[]) => {
+    try {
+      await Promise.all([
+        AsyncStorage.setItem(STORAGE_KEYS.QR_ITEMS, JSON.stringify(qrItems)),
+        AsyncStorage.setItem(STORAGE_KEYS.SLIDE_ITEMS, JSON.stringify(slideItems)),
+      ]);
+    } catch (error) {
+      console.error('[Control] Error saving content:', error);
+    }
+  };
 
   useEffect(() => {
     setMode('control');
@@ -144,8 +194,10 @@ export default function ControlScreen() {
       createdAt: Date.now(),
     };
 
+    const updatedQRs = [...content.qrItems, newQR];
     addQRItem(newQR);
-    syncContent([...content.qrItems, newQR], content.slideItems);
+    saveContent(updatedQRs, content.slideItems);
+    syncContent(updatedQRs, content.slideItems);
     setQrName('');
     setQrUrl('');
   };
@@ -155,20 +207,33 @@ export default function ControlScreen() {
       mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [16, 9],
-      quality: 0.8,
+      quality: 0.7,
     });
 
     if (!result.canceled && result.assets[0]) {
-      const newSlide: SlideItem = {
-        id: Date.now().toString(),
-        name: slideName || `Slide ${content.slideItems.length + 1}`,
-        imageUri: result.assets[0].uri,
-        createdAt: Date.now(),
-      };
+      try {
+        // Convert image to base64 for network transfer
+        const base64 = await FileSystem.readAsStringAsync(result.assets[0].uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
 
-      addSlideItem(newSlide);
-      syncContent(content.qrItems, [...content.slideItems, newSlide]);
-      setSlideName('');
+        const newSlide: SlideItem = {
+          id: Date.now().toString(),
+          name: slideName || `Slide ${content.slideItems.length + 1}`,
+          imageUri: result.assets[0].uri,
+          imageBase64: `data:image/jpeg;base64,${base64}`,
+          createdAt: Date.now(),
+        };
+
+        const updatedSlides = [...content.slideItems, newSlide];
+        addSlideItem(newSlide);
+        saveContent(content.qrItems, updatedSlides);
+        syncContent(content.qrItems, updatedSlides);
+        setSlideName('');
+      } catch (error) {
+        console.error('[Control] Error converting image to base64:', error);
+        Alert.alert(t('error'), 'Failed to process image');
+      }
     }
   };
 
@@ -183,12 +248,14 @@ export default function ControlScreen() {
   const handleRemoveQR = (id: string) => {
     removeQRItem(id);
     const updatedQRs = content.qrItems.filter((item) => item.id !== id);
+    saveContent(updatedQRs, content.slideItems);
     syncContent(updatedQRs, content.slideItems);
   };
 
   const handleRemoveSlide = (id: string) => {
     removeSlideItem(id);
     const updatedSlides = content.slideItems.filter((item) => item.id !== id);
+    saveContent(content.qrItems, updatedSlides);
     syncContent(content.qrItems, updatedSlides);
   };
 
@@ -202,6 +269,14 @@ export default function ControlScreen() {
 
   const handleStopPresentation = () => {
     controlClient.send({ type: 'stop_presentation' });
+  };
+
+  const handleDisconnect = () => {
+    controlClient.disconnect();
+    setConnected(false);
+    setControlState('scan');
+    setScanned(false);
+    router.replace('/');
   };
 
   // Connection screens
@@ -336,10 +411,9 @@ export default function ControlScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.logo}>{t('appName')}</Text>
-        <View style={styles.connectedBadge}>
-          <View style={styles.connectedDot} />
-          <Text style={styles.connectedText}>{t('connected')}</Text>
-        </View>
+        <TouchableOpacity style={styles.disconnectButton} onPress={handleDisconnect}>
+          <Text style={styles.disconnectButtonText}>{t('disconnect') || 'Desconectar'}</Text>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.tabs}>
@@ -771,5 +845,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
     color: '#FFFFFF',
+  },
+  disconnectButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#EF4444',
+    borderRadius: 8,
+  },
+  disconnectButtonText: {
+    fontSize: 12,
+    color: '#EF4444',
   },
 });

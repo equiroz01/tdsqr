@@ -11,9 +11,9 @@ export function isAndroidTV(): boolean {
   // Android TV devices have the leanback feature
   try {
     // @ts-ignore - accessing native constants
-    const uiMode = Platform.constants?.uiMode;
+    const uiMode = Platform.constants?.uiMode as number | undefined;
     // UI_MODE_TYPE_TELEVISION = 4
-    if (uiMode && (uiMode & 0x0f) === 4) {
+    if (typeof uiMode === 'number' && (uiMode & 0x0f) === 4) {
       return true;
     }
   } catch (e) {
