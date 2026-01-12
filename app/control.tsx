@@ -20,12 +20,20 @@ import QRCode from 'react-native-qrcode-svg';
 import { useRouter } from 'expo-router';
 import { useApp } from '../src/context/AppContext';
 import { controlClient } from '../src/services/TCPCommunication';
-import { QRItem, SlideItem, SyncStatus } from '../src/types';
+import { QRItem, SlideItem, SyncStatus, TransitionType } from '../src/types';
 import { useTranslation } from '../src/i18n';
+
+const INTERVAL_OPTIONS = [3, 5, 10, 15, 30];
+const TRANSITION_OPTIONS: { value: TransitionType; label: string }[] = [
+  { value: 'none', label: 'Sin transición' },
+  { value: 'fade', label: 'Desvanecer' },
+  { value: 'slide', label: 'Deslizar' },
+];
 
 const STORAGE_KEYS = {
   QR_ITEMS: '@tdsqr/controller_qr_items',
   SLIDE_ITEMS: '@tdsqr/controller_slide_items',
+  SETTINGS: '@tdsqr/controller_settings',
 };
 
 const { width } = Dimensions.get('window');
@@ -59,7 +67,7 @@ const SyncIndicator = ({ status }: { status?: SyncStatus }) => {
 };
 
 export default function ControlScreen() {
-  const { setMode, isConnected, setConnected, content, addQRItem, addSlideItem, removeQRItem, removeSlideItem, clearContent, setContent } = useApp();
+  const { setMode, isConnected, setConnected, content, addQRItem, addSlideItem, removeQRItem, removeSlideItem, clearContent, setContent, setInterval, setTransition } = useApp();
   const { t } = useTranslation();
   const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
@@ -81,11 +89,34 @@ export default function ControlScreen() {
   const [slideName, setSlideName] = useState('');
   const [isLoadingContent, setIsLoadingContent] = useState(true);
   const [isProcessingImage, setIsProcessingImage] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   // Load saved content on mount
   useEffect(() => {
     loadSavedContent();
+    loadSavedSettings();
   }, []);
+
+  const loadSavedSettings = async () => {
+    try {
+      const data = await AsyncStorage.getItem(STORAGE_KEYS.SETTINGS);
+      if (data) {
+        const settings = JSON.parse(data);
+        if (settings.interval) setInterval(settings.interval);
+        if (settings.transition) setTransition(settings.transition);
+      }
+    } catch (error) {
+      console.error('[Control] Error loading settings:', error);
+    }
+  };
+
+  const saveSettings = async (interval: number, transition: TransitionType) => {
+    try {
+      await AsyncStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify({ interval, transition }));
+    } catch (error) {
+      console.error('[Control] Error saving settings:', error);
+    }
+  };
 
   const loadSavedContent = async () => {
     try {
@@ -191,6 +222,10 @@ export default function ControlScreen() {
       type: 'content_update',
       qrItems,
       slideItems,
+      settings: {
+        interval: content.interval,
+        transition: content.transition,
+      },
     });
 
     // Fallback: clear syncing state after timeout if no confirmation
@@ -198,6 +233,36 @@ export default function ControlScreen() {
       setIsSyncing(false);
       setSyncingItemIds(new Set());
     }, 5000);
+  };
+
+  const handleIntervalChange = (newInterval: number) => {
+    setInterval(newInterval);
+    saveSettings(newInterval, content.transition);
+    // Send settings update to TV if connected
+    if (isConnected) {
+      controlClient.send({
+        type: 'settings_update',
+        settings: {
+          interval: newInterval,
+          transition: content.transition,
+        },
+      });
+    }
+  };
+
+  const handleTransitionChange = (newTransition: TransitionType) => {
+    setTransition(newTransition);
+    saveSettings(content.interval, newTransition);
+    // Send settings update to TV if connected
+    if (isConnected) {
+      controlClient.send({
+        type: 'settings_update',
+        settings: {
+          interval: content.interval,
+          transition: newTransition,
+        },
+      });
+    }
   };
 
   const handleBarCodeScanned = ({ data }: { data: string }) => {
@@ -689,7 +754,69 @@ export default function ControlScreen() {
         )}
       </ScrollView>
 
+      {/* Settings Panel */}
+      {showSettings && (
+        <View style={styles.settingsPanel}>
+          <View style={styles.settingRow}>
+            <Text style={styles.settingLabel}>{t('interval') || 'Intervalo'}</Text>
+            <View style={styles.settingOptions}>
+              {INTERVAL_OPTIONS.map((opt) => (
+                <TouchableOpacity
+                  key={opt}
+                  style={[
+                    styles.settingOption,
+                    content.interval === opt && styles.settingOptionActive,
+                  ]}
+                  onPress={() => handleIntervalChange(opt)}
+                >
+                  <Text
+                    style={[
+                      styles.settingOptionText,
+                      content.interval === opt && styles.settingOptionTextActive,
+                    ]}
+                  >
+                    {opt}s
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.settingRow}>
+            <Text style={styles.settingLabel}>{t('transition') || 'Transición'}</Text>
+            <View style={styles.settingOptions}>
+              {TRANSITION_OPTIONS.map((opt) => (
+                <TouchableOpacity
+                  key={opt.value}
+                  style={[
+                    styles.settingOption,
+                    styles.settingOptionWide,
+                    content.transition === opt.value && styles.settingOptionActive,
+                  ]}
+                  onPress={() => handleTransitionChange(opt.value)}
+                >
+                  <Text
+                    style={[
+                      styles.settingOptionText,
+                      content.transition === opt.value && styles.settingOptionTextActive,
+                    ]}
+                  >
+                    {t(opt.value) || opt.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        </View>
+      )}
+
       <View style={styles.controlBar}>
+        <TouchableOpacity
+          style={styles.settingsButton}
+          onPress={() => setShowSettings(!showSettings)}
+        >
+          <Text style={styles.settingsButtonText}>⚙</Text>
+        </TouchableOpacity>
         <Text style={styles.contentCount}>
           {content.qrItems.length + content.slideItems.length} {t('elements')}
         </Text>
@@ -1053,5 +1180,63 @@ const styles = StyleSheet.create({
   disconnectButtonText: {
     fontSize: 12,
     color: '#EF4444',
+  },
+  settingsButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#16161F',
+    borderWidth: 1,
+    borderColor: '#2D2D3A',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  settingsButtonText: {
+    fontSize: 20,
+    color: '#9CA3AF',
+  },
+  settingsPanel: {
+    backgroundColor: '#16161F',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#2D2D3A',
+    gap: 16,
+  },
+  settingRow: {
+    gap: 8,
+  },
+  settingLabel: {
+    fontSize: 14,
+    color: '#9CA3AF',
+    marginBottom: 4,
+  },
+  settingOptions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  settingOption: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: '#0A0A0F',
+    borderWidth: 1,
+    borderColor: '#2D2D3A',
+  },
+  settingOptionWide: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  settingOptionActive: {
+    backgroundColor: '#2DD4BF',
+    borderColor: '#2DD4BF',
+  },
+  settingOptionText: {
+    fontSize: 14,
+    color: '#9CA3AF',
+  },
+  settingOptionTextActive: {
+    color: '#000000',
+    fontWeight: 'bold',
   },
 });

@@ -19,6 +19,11 @@ export const translations = {
     processing: 'Procesando...',
     imageFormatHint: 'Formato: 16:9',
     imageProcessError: 'Error al procesar imagen',
+    interval: 'Intervalo',
+    transition: 'Transición',
+    none: 'Ninguna',
+    fade: 'Desvanecer',
+    slide: 'Deslizar',
 
     // Mode Select Screen
     modeQuestion: '¿Cómo vas a usar este dispositivo?',
@@ -106,6 +111,11 @@ export const translations = {
     processing: 'Processing...',
     imageFormatHint: 'Format: 16:9',
     imageProcessError: 'Error processing image',
+    interval: 'Interval',
+    transition: 'Transition',
+    none: 'None',
+    fade: 'Fade',
+    slide: 'Slide',
 
     // Mode Select Screen
     modeQuestion: 'How will you use this device?',
@@ -193,6 +203,11 @@ export const translations = {
     processing: 'Processando...',
     imageFormatHint: 'Formato: 16:9',
     imageProcessError: 'Erro ao processar imagem',
+    interval: 'Intervalo',
+    transition: 'Transição',
+    none: 'Nenhuma',
+    fade: 'Desvanecer',
+    slide: 'Deslizar',
 
     // Mode Select Screen
     modeQuestion: 'Como você vai usar este dispositivo?',

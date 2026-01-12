@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, Dimensions, Image, BackHandler, TouchableOpacity, Pressable } from 'react-native';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { View, Text, StyleSheet, ActivityIndicator, Dimensions, Image, BackHandler, TouchableOpacity, Pressable, Animated } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -7,17 +7,18 @@ import QRCode from 'react-native-qrcode-svg';
 import { useApp } from '../src/context/AppContext';
 import { getLocalIP, generatePIN, PORT } from '../src/services/NetworkService';
 import { tvServer } from '../src/services/TCPCommunication';
-import { QRItem, SlideItem } from '../src/types';
+import { QRItem, SlideItem, TransitionType } from '../src/types';
 import { useTranslation } from '../src/i18n';
 
 const TV_STORAGE_KEY = '@tdsqr/tv_content';
+const TV_SETTINGS_KEY = '@tdsqr/tv_settings';
 
 const { width, height } = Dimensions.get('window');
 
 type TVState = 'loading' | 'waiting' | 'connected' | 'presenting';
 
 export default function TVScreen() {
-  const { setMode, setConnected, setConnectionInfo, content, setContent } = useApp();
+  const { setMode, setConnected, setConnectionInfo, content, setContent, setInterval, setTransition } = useApp();
   const { t } = useTranslation();
   const router = useRouter();
   const [tvState, setTVState] = useState<TVState>('loading');
@@ -32,6 +33,10 @@ export default function TVScreen() {
   const [exitTapCount, setExitTapCount] = useState(0);
   const [lastTapTime, setLastTapTime] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
+
+  // Animation refs
+  const fadeAnim = useRef(new Animated.Value(1)).current;
+  const slideAnim = useRef(new Animated.Value(0)).current;
 
   // Combined content for presentation
   const allContent = [...localContent.qrItems, ...localContent.slideItems];
@@ -63,6 +68,74 @@ export default function TVScreen() {
     }
   };
 
+  // Load saved settings from storage
+  const loadSavedSettings = async () => {
+    try {
+      const data = await AsyncStorage.getItem(TV_SETTINGS_KEY);
+      if (data) {
+        const settings = JSON.parse(data);
+        if (settings.interval) setInterval(settings.interval);
+        if (settings.transition) setTransition(settings.transition);
+      }
+    } catch (error) {
+      console.error('[TV] Error loading settings:', error);
+    }
+  };
+
+  // Save settings to storage
+  const saveSettingsToStorage = async (interval: number, transition: TransitionType) => {
+    try {
+      await AsyncStorage.setItem(TV_SETTINGS_KEY, JSON.stringify({ interval, transition }));
+    } catch (error) {
+      console.error('[TV] Error saving settings:', error);
+    }
+  };
+
+  // Animate transition
+  const animateTransition = (callback: () => void) => {
+    const transitionType = content.transition;
+
+    if (transitionType === 'none') {
+      callback();
+      return;
+    }
+
+    if (transitionType === 'fade') {
+      Animated.sequence([
+        Animated.timing(fadeAnim, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]).start();
+      setTimeout(callback, 300);
+    } else if (transitionType === 'slide') {
+      Animated.sequence([
+        Animated.timing(slideAnim, {
+          toValue: -width,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: width,
+          duration: 0,
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]).start();
+      setTimeout(callback, 300);
+    }
+  };
+
   // Handle exit tap (5 taps in corner to exit)
   const handleExitTap = () => {
     const now = Date.now();
@@ -84,8 +157,9 @@ export default function TVScreen() {
   useEffect(() => {
     setMode('tv');
 
-    // Load saved content first
+    // Load saved content and settings first
     loadSavedContent();
+    loadSavedSettings();
 
     // Prevent back button on TV (stay in TV mode)
     const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -163,6 +237,13 @@ export default function TVScreen() {
         // Save content for persistence (works without connection)
         saveContentToStorage(newQRItems, newSlideItems);
 
+        // Apply settings if included
+        if (data.settings) {
+          if (data.settings.interval) setInterval(data.settings.interval);
+          if (data.settings.transition) setTransition(data.settings.transition);
+          saveSettingsToStorage(data.settings.interval || 5, data.settings.transition || 'fade');
+        }
+
         // Confirm receipt to controller
         tvServer.sendToAll({ type: 'content_received' });
         setIsSyncing(false);
@@ -172,6 +253,14 @@ export default function TVScreen() {
           setCurrentSlideIndex(0);
         } else {
           setTVState('connected');
+        }
+        break;
+
+      case 'settings_update':
+        if (data.settings) {
+          if (data.settings.interval) setInterval(data.settings.interval);
+          if (data.settings.transition) setTransition(data.settings.transition);
+          saveSettingsToStorage(data.settings.interval || 5, data.settings.transition || 'fade');
         }
         break;
 
@@ -187,13 +276,17 @@ export default function TVScreen() {
         break;
 
       case 'next_slide':
-        setCurrentSlideIndex((prev) => (prev + 1) % Math.max(allContent.length, 1));
+        animateTransition(() => {
+          setCurrentSlideIndex((prev) => (prev + 1) % Math.max(allContent.length, 1));
+        });
         break;
 
       case 'prev_slide':
-        setCurrentSlideIndex((prev) =>
-          (prev - 1 + Math.max(allContent.length, 1)) % Math.max(allContent.length, 1)
-        );
+        animateTransition(() => {
+          setCurrentSlideIndex((prev) =>
+            (prev - 1 + Math.max(allContent.length, 1)) % Math.max(allContent.length, 1)
+          );
+        });
         break;
 
       case 'go_to_slide':
@@ -209,18 +302,20 @@ export default function TVScreen() {
     setTVState(tvServer.isClientConnected() ? 'connected' : 'waiting');
   };
 
-  // Auto-advance slides
+  // Auto-advance slides with transition
   useEffect(() => {
     if (tvState !== 'presenting' || allContent.length <= 1 || !content.isPlaying) {
       return;
     }
 
-    const timer = setInterval(() => {
-      setCurrentSlideIndex((prev) => (prev + 1) % allContent.length);
+    const timer = window.setInterval(() => {
+      animateTransition(() => {
+        setCurrentSlideIndex((prev) => (prev + 1) % allContent.length);
+      });
     }, content.interval * 1000);
 
-    return () => clearInterval(timer);
-  }, [tvState, allContent.length, content.isPlaying, content.interval]);
+    return () => window.clearInterval(timer);
+  }, [tvState, allContent.length, content.isPlaying, content.interval, content.transition]);
 
   const connectionUrl = `tdsqr://${localIP}:${PORT}/${pin}`;
 
@@ -331,26 +426,36 @@ export default function TVScreen() {
 
   return (
     <View style={styles.presentationContainer}>
-      {isQR ? (
-        <View style={styles.qrSlide}>
-          <View style={styles.qrSlideCode}>
-            <QRCode
-              value={(currentItem as QRItem).url}
-              size={Math.min(width * 0.7, height * 0.6)}
-              color="#000000"
-              backgroundColor="#FFFFFF"
+      <Animated.View
+        style={[
+          styles.animatedContent,
+          {
+            opacity: fadeAnim,
+            transform: [{ translateX: slideAnim }],
+          },
+        ]}
+      >
+        {isQR ? (
+          <View style={styles.qrSlide}>
+            <View style={styles.qrSlideCode}>
+              <QRCode
+                value={(currentItem as QRItem).url}
+                size={Math.min(width * 0.7, height * 0.6)}
+                color="#000000"
+                backgroundColor="#FFFFFF"
+              />
+            </View>
+          </View>
+        ) : (
+          <View style={styles.imageSlide}>
+            <Image
+              source={{ uri: (currentItem as SlideItem).imageBase64 || (currentItem as SlideItem).imageUri }}
+              style={styles.slideImage}
+              resizeMode="contain"
             />
           </View>
-        </View>
-      ) : (
-        <View style={styles.imageSlide}>
-          <Image
-            source={{ uri: (currentItem as SlideItem).imageBase64 || (currentItem as SlideItem).imageUri }}
-            style={styles.slideImage}
-            resizeMode="contain"
-          />
-        </View>
-      )}
+        )}
+      </Animated.View>
 
       {/* Syncing indicator */}
       {isSyncing && (
@@ -641,5 +746,11 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 20,
     fontWeight: 'bold',
+  },
+  animatedContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: '100%',
   },
 });

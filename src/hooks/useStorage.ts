@@ -12,6 +12,7 @@ const DEFAULT_SETTINGS: PresentationSettings = {
   slideInterval: 5,
   autoLoop: true,
   showIndicators: true,
+  transition: 'fade',
 };
 
 export function useQRItems() {

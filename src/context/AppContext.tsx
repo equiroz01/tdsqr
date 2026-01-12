@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
-import { QRItem, SlideItem } from '../types';
+import { QRItem, SlideItem, TransitionType } from '../types';
 
 export type AppMode = 'select' | 'tv' | 'control';
 
@@ -16,6 +16,7 @@ interface AppState {
     currentIndex: number;
     isPlaying: boolean;
     interval: number;
+    transition: TransitionType;
   };
 }
 
@@ -31,6 +32,7 @@ interface AppContextType extends AppState {
   setCurrentIndex: (index: number) => void;
   setIsPlaying: (playing: boolean) => void;
   setInterval: (interval: number) => void;
+  setTransition: (transition: TransitionType) => void;
   clearContent: () => void;
 }
 
@@ -47,6 +49,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       currentIndex: 0,
       isPlaying: true,
       interval: 5,
+      transition: 'fade',
     },
   });
 
@@ -134,6 +137,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }));
   }, []);
 
+  const setTransition = useCallback((transition: TransitionType) => {
+    setState((prev) => ({
+      ...prev,
+      content: { ...prev.content, transition },
+    }));
+  }, []);
+
   const clearContent = useCallback(() => {
     setState((prev) => ({
       ...prev,
@@ -143,6 +153,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         currentIndex: 0,
         isPlaying: true,
         interval: 5,
+        transition: 'fade',
       },
     }));
   }, []);
@@ -162,6 +173,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setCurrentIndex,
         setIsPlaying,
         setInterval,
+        setTransition,
         clearContent,
       }}
     >

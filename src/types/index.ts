@@ -17,8 +17,11 @@ export interface SlideItem {
   syncStatus?: SyncStatus;
 }
 
+export type TransitionType = 'none' | 'fade' | 'slide';
+
 export interface PresentationSettings {
-  slideInterval: number; // in seconds (3, 5, 10)
+  slideInterval: number; // in seconds (3, 5, 10, 15, 30)
   autoLoop: boolean;
   showIndicators: boolean;
+  transition: TransitionType;
 }

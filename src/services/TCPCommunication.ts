@@ -9,6 +9,7 @@ type MessageType =
   | 'content_update'
   | 'content_received'
   | 'sync_request'
+  | 'settings_update'
   | 'start_presentation'
   | 'stop_presentation'
   | 'ping'
