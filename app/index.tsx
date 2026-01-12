@@ -30,7 +30,7 @@ export default function ModeSelectScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#A855F7" />
+          <ActivityIndicator size="large" color="#2DD4BF" />
           <Text style={styles.loadingText}>{t('loading')}</Text>
         </View>
       </SafeAreaView>
@@ -42,7 +42,7 @@ export default function ModeSelectScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#A855F7" />
+          <ActivityIndicator size="large" color="#2DD4BF" />
           <Text style={styles.loadingText}>{t('loading')}</Text>
         </View>
       </SafeAreaView>
@@ -147,7 +147,7 @@ const styles = StyleSheet.create({
   logo: {
     fontSize: 42,
     fontWeight: 'bold',
-    color: '#A855F7',
+    color: '#2DD4BF',
   },
   subtitle: {
     fontSize: 14,

@@ -156,7 +156,7 @@ export default function TVScreen() {
   if (tvState === 'loading') {
     return (
       <SafeAreaView style={styles.container}>
-        <ActivityIndicator size="large" color="#A855F7" />
+        <ActivityIndicator size="large" color="#2DD4BF" />
         <Text style={styles.loadingText}>{t('startingServer')}</Text>
         {serverError && (
           <Text style={styles.errorText}>{serverError}</Text>
@@ -318,7 +318,7 @@ const styles = StyleSheet.create({
   logo: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#A855F7',
+    color: '#2DD4BF',
     marginBottom: 8,
   },
   title: {
@@ -366,7 +366,7 @@ const styles = StyleSheet.create({
   pin: {
     fontSize: 48,
     fontWeight: 'bold',
-    color: '#A855F7',
+    color: '#2DD4BF',
     letterSpacing: 8,
   },
   infoContainer: {
@@ -390,7 +390,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#A855F7',
+    backgroundColor: '#2DD4BF',
     marginRight: 8,
   },
   statusText: {
@@ -403,7 +403,7 @@ const styles = StyleSheet.create({
   },
   connectedIcon: {
     fontSize: 64,
-    color: '#A855F7',
+    color: '#2DD4BF',
     marginBottom: 16,
   },
   connectedTitle: {
@@ -450,7 +450,7 @@ const styles = StyleSheet.create({
   },
   qrSlideUrl: {
     fontSize: 16,
-    color: '#C084FC',
+    color: '#5EEAD4',
     textAlign: 'center',
   },
   imageSlide: {
@@ -491,7 +491,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#2D2D3A',
   },
   indicatorActive: {
-    backgroundColor: '#A855F7',
+    backgroundColor: '#2DD4BF',
     width: 24,
   },
 });

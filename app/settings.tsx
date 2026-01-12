@@ -92,7 +92,7 @@ const styles = StyleSheet.create({
   },
   backButtonText: {
     fontSize: 24,
-    color: '#A855F7',
+    color: '#2DD4BF',
     fontWeight: 'bold',
   },
   title: {
@@ -132,7 +132,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#2D2D3A',
   },
   optionItemActive: {
-    backgroundColor: 'rgba(168, 85, 247, 0.1)',
+    backgroundColor: 'rgba(45, 212, 191, 0.1)',
   },
   optionFlag: {
     fontSize: 24,
@@ -144,12 +144,12 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   optionTextActive: {
-    color: '#A855F7',
+    color: '#2DD4BF',
     fontWeight: '600',
   },
   checkmark: {
     fontSize: 18,
-    color: '#A855F7',
+    color: '#2DD4BF',
     fontWeight: 'bold',
   },
   aboutCard: {
@@ -161,7 +161,7 @@ const styles = StyleSheet.create({
   appName: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#A855F7',
+    color: '#2DD4BF',
     marginBottom: 4,
   },
   appSubtitle: {

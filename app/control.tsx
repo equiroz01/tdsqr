@@ -489,7 +489,7 @@ const styles = StyleSheet.create({
   logo: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#A855F7',
+    color: '#2DD4BF',
   },
   headerSubtitle: {
     fontSize: 14,
@@ -514,7 +514,7 @@ const styles = StyleSheet.create({
     marginBottom: 32,
   },
   primaryButton: {
-    backgroundColor: '#A855F7',
+    backgroundColor: '#2DD4BF',
     paddingVertical: 16,
     paddingHorizontal: 32,
     borderRadius: 12,
@@ -536,7 +536,7 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: {
     fontSize: 14,
-    color: '#C084FC',
+    color: '#5EEAD4',
   },
   scannerContainer: {
     height: width * 0.8,
@@ -557,7 +557,7 @@ const styles = StyleSheet.create({
     width: width * 0.6,
     height: width * 0.6,
     borderWidth: 2,
-    borderColor: '#A855F7',
+    borderColor: '#2DD4BF',
     borderRadius: 16,
   },
   scanInstruction: {
@@ -572,7 +572,7 @@ const styles = StyleSheet.create({
   },
   manualButtonText: {
     fontSize: 14,
-    color: '#C084FC',
+    color: '#5EEAD4',
     textAlign: 'center',
   },
   manualForm: {
@@ -606,7 +606,7 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#A855F7',
+    color: '#2DD4BF',
     marginBottom: 8,
     letterSpacing: 8,
   },
@@ -619,7 +619,7 @@ const styles = StyleSheet.create({
   connectedBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(168, 85, 247, 0.15)',
+    backgroundColor: 'rgba(45, 212, 191, 0.15)',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
@@ -628,12 +628,12 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#A855F7',
+    backgroundColor: '#2DD4BF',
     marginRight: 6,
   },
   connectedText: {
     fontSize: 12,
-    color: '#C084FC',
+    color: '#5EEAD4',
   },
   tabs: {
     flexDirection: 'row',
@@ -650,7 +650,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   tabActive: {
-    backgroundColor: '#A855F7',
+    backgroundColor: '#2DD4BF',
   },
   tabText: {
     fontSize: 14,
@@ -675,14 +675,14 @@ const styles = StyleSheet.create({
   addButton: {
     backgroundColor: '#16161F',
     borderWidth: 1,
-    borderColor: '#A855F7',
+    borderColor: '#2DD4BF',
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
   },
   addButtonText: {
     fontSize: 16,
-    color: '#A855F7',
+    color: '#2DD4BF',
     fontWeight: 'bold',
   },
   emptyState: {
@@ -762,7 +762,7 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
   },
   startButton: {
-    backgroundColor: '#A855F7',
+    backgroundColor: '#2DD4BF',
     paddingVertical: 12,
     paddingHorizontal: 24,
     borderRadius: 12,
