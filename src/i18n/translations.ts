@@ -15,6 +15,10 @@ export const translations = {
     connected: 'Conectado',
     disconnect: 'Desconectar',
     exit: 'Salir',
+    syncing: 'Sincronizando...',
+    processing: 'Procesando...',
+    imageFormatHint: 'Formato: 16:9',
+    imageProcessError: 'Error al procesar imagen',
 
     // Mode Select Screen
     modeQuestion: '¿Cómo vas a usar este dispositivo?',
@@ -98,6 +102,10 @@ export const translations = {
     connected: 'Connected',
     disconnect: 'Disconnect',
     exit: 'Exit',
+    syncing: 'Syncing...',
+    processing: 'Processing...',
+    imageFormatHint: 'Format: 16:9',
+    imageProcessError: 'Error processing image',
 
     // Mode Select Screen
     modeQuestion: 'How will you use this device?',
@@ -181,6 +189,10 @@ export const translations = {
     connected: 'Conectado',
     disconnect: 'Desconectar',
     exit: 'Sair',
+    syncing: 'Sincronizando...',
+    processing: 'Processando...',
+    imageFormatHint: 'Formato: 16:9',
+    imageProcessError: 'Erro ao processar imagem',
 
     // Mode Select Screen
     modeQuestion: 'Como você vai usar este dispositivo?',

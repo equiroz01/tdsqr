@@ -31,6 +31,7 @@ export default function TVScreen() {
   });
   const [exitTapCount, setExitTapCount] = useState(0);
   const [lastTapTime, setLastTapTime] = useState(0);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Combined content for presentation
   const allContent = [...localContent.qrItems, ...localContent.slideItems];
@@ -154,15 +155,23 @@ export default function TVScreen() {
 
     switch (data.type) {
       case 'content_update':
+        setIsSyncing(true);
         const newQRItems = data.qrItems || [];
         const newSlideItems = data.slideItems || [];
         setLocalContent({ qrItems: newQRItems, slideItems: newSlideItems });
         setContent(newQRItems, newSlideItems);
         // Save content for persistence (works without connection)
         saveContentToStorage(newQRItems, newSlideItems);
+
+        // Confirm receipt to controller
+        tvServer.sendToAll({ type: 'content_received' });
+        setIsSyncing(false);
+
         if (newQRItems.length > 0 || newSlideItems.length > 0) {
           setTVState('presenting');
           setCurrentSlideIndex(0);
+        } else {
+          setTVState('connected');
         }
         break;
 
@@ -194,6 +203,11 @@ export default function TVScreen() {
         break;
     }
   }, [allContent.length]);
+
+  // Stop presentation and go back to connected/waiting state
+  const handleStopPresentation = () => {
+    setTVState(tvServer.isClientConnected() ? 'connected' : 'waiting');
+  };
 
   // Auto-advance slides
   useEffect(() => {
@@ -338,6 +352,14 @@ export default function TVScreen() {
         </View>
       )}
 
+      {/* Syncing indicator */}
+      {isSyncing && (
+        <View style={styles.syncingOverlay}>
+          <ActivityIndicator size="large" color="#2DD4BF" />
+          <Text style={styles.syncingText}>{t('syncing') || 'Sincronizando...'}</Text>
+        </View>
+      )}
+
       {/* Slide indicators */}
       {allContent.length > 1 && (
         <View style={styles.indicators}>
@@ -352,6 +374,11 @@ export default function TVScreen() {
           ))}
         </View>
       )}
+
+      {/* Stop presentation button - bottom right corner */}
+      <TouchableOpacity style={styles.stopPresentationButton} onPress={handleStopPresentation}>
+        <Text style={styles.stopPresentationText}>✕</Text>
+      </TouchableOpacity>
 
       {/* Exit tap zone - top left corner */}
       <Pressable style={styles.exitZone} onPress={handleExitTap} />
@@ -580,5 +607,39 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     backgroundColor: 'transparent',
+  },
+  syncingOverlay: {
+    position: 'absolute',
+    top: 20,
+    right: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    gap: 8,
+  },
+  syncingText: {
+    color: '#2DD4BF',
+    fontSize: 14,
+  },
+  stopPresentationButton: {
+    position: 'absolute',
+    bottom: 20,
+    right: 20,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  stopPresentationText: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: 'bold',
   },
 });

@@ -7,6 +7,8 @@ type MessageType =
   | 'auth_success'
   | 'auth_failed'
   | 'content_update'
+  | 'content_received'
+  | 'sync_request'
   | 'start_presentation'
   | 'stop_presentation'
   | 'ping'

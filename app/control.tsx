@@ -20,7 +20,7 @@ import QRCode from 'react-native-qrcode-svg';
 import { useRouter } from 'expo-router';
 import { useApp } from '../src/context/AppContext';
 import { controlClient } from '../src/services/TCPCommunication';
-import { QRItem, SlideItem } from '../src/types';
+import { QRItem, SlideItem, SyncStatus } from '../src/types';
 import { useTranslation } from '../src/i18n';
 
 const STORAGE_KEYS = {
@@ -33,8 +33,33 @@ const { width } = Dimensions.get('window');
 type ControlState = 'scan' | 'manual' | 'connected';
 type Tab = 'qr' | 'slides';
 
+// Sync status indicator component
+const SyncIndicator = ({ status }: { status?: SyncStatus }) => {
+  if (!status || status === 'synced') return null;
+
+  const getColor = () => {
+    switch (status) {
+      case 'syncing': return '#F59E0B';
+      case 'pending': return '#6B7280';
+      case 'error': return '#EF4444';
+      case 'deleting': return '#EF4444';
+      default: return '#6B7280';
+    }
+  };
+
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 8 }}>
+      {status === 'syncing' || status === 'deleting' ? (
+        <ActivityIndicator size="small" color={getColor()} />
+      ) : (
+        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: getColor() }} />
+      )}
+    </View>
+  );
+};
+
 export default function ControlScreen() {
-  const { setMode, isConnected, setConnected, content, addQRItem, addSlideItem, removeQRItem, removeSlideItem, clearContent } = useApp();
+  const { setMode, isConnected, setConnected, content, addQRItem, addSlideItem, removeQRItem, removeSlideItem, clearContent, setContent } = useApp();
   const { t } = useTranslation();
   const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
@@ -44,6 +69,9 @@ export default function ControlScreen() {
   const [ipInput, setIpInput] = useState('');
   const [scanned, setScanned] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncingItemIds, setSyncingItemIds] = useState<Set<string>>(new Set());
+  const [deletingItemIds, setDeletingItemIds] = useState<Set<string>>(new Set());
 
   // QR creation form
   const [qrName, setQrName] = useState('');
@@ -52,6 +80,7 @@ export default function ControlScreen() {
   // Slide creation
   const [slideName, setSlideName] = useState('');
   const [isLoadingContent, setIsLoadingContent] = useState(true);
+  const [isProcessingImage, setIsProcessingImage] = useState(false);
 
   // Load saved content on mount
   useEffect(() => {
@@ -123,6 +152,12 @@ export default function ControlScreen() {
         Alert.alert(t('connected'), t('connectionSuccess'));
         setConnected(true);
         setControlState('connected');
+        // Send current content to TV after connecting
+        if (content.qrItems.length > 0 || content.slideItems.length > 0) {
+          setTimeout(() => {
+            syncContentToTV(content.qrItems, content.slideItems);
+          }, 500);
+        }
         break;
       case 'auth_failed':
         setIsConnecting(false);
@@ -131,7 +166,38 @@ export default function ControlScreen() {
         setControlState('scan');
         setScanned(false);
         break;
+      case 'content_received':
+        // TV confirmed receipt of content
+        setIsSyncing(false);
+        setSyncingItemIds(new Set());
+        setDeletingItemIds(new Set());
+        console.log('[Control] TV confirmed content received');
+        break;
+      case 'sync_request':
+        // TV is requesting content sync
+        console.log('[Control] TV requested sync');
+        syncContentToTV(content.qrItems, content.slideItems);
+        break;
     }
+  };
+
+  const syncContentToTV = (qrItems: QRItem[], slideItems: SlideItem[]) => {
+    setIsSyncing(true);
+    // Mark all items as syncing
+    const allIds = new Set([...qrItems.map(q => q.id), ...slideItems.map(s => s.id)]);
+    setSyncingItemIds(allIds);
+
+    controlClient.send({
+      type: 'content_update',
+      qrItems,
+      slideItems,
+    });
+
+    // Fallback: clear syncing state after timeout if no confirmation
+    setTimeout(() => {
+      setIsSyncing(false);
+      setSyncingItemIds(new Set());
+    }, 5000);
   };
 
   const handleBarCodeScanned = ({ data }: { data: string }) => {
@@ -192,25 +258,35 @@ export default function ControlScreen() {
       name: qrName,
       url: qrUrl.startsWith('http') ? qrUrl : `https://${qrUrl}`,
       createdAt: Date.now(),
+      syncStatus: 'pending',
     };
 
     const updatedQRs = [...content.qrItems, newQR];
     addQRItem(newQR);
     saveContent(updatedQRs, content.slideItems);
-    syncContent(updatedQRs, content.slideItems);
+
+    // Sync to TV if connected
+    if (isConnected) {
+      syncContentToTV(updatedQRs, content.slideItems);
+    }
+
     setQrName('');
     setQrUrl('');
   };
 
   const handlePickImage = async () => {
+    if (isProcessingImage) return;
+
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [16, 9],
-      quality: 0.7,
+      quality: 0.6,
     });
 
     if (!result.canceled && result.assets[0]) {
+      setIsProcessingImage(true);
+
       try {
         // Convert image to base64 for network transfer
         const base64 = await FileSystem.readAsStringAsync(result.assets[0].uri, {
@@ -223,40 +299,66 @@ export default function ControlScreen() {
           imageUri: result.assets[0].uri,
           imageBase64: `data:image/jpeg;base64,${base64}`,
           createdAt: Date.now(),
+          syncStatus: 'pending',
         };
 
         const updatedSlides = [...content.slideItems, newSlide];
         addSlideItem(newSlide);
         saveContent(content.qrItems, updatedSlides);
-        syncContent(content.qrItems, updatedSlides);
+
+        // Sync to TV if connected
+        if (isConnected) {
+          syncContentToTV(content.qrItems, updatedSlides);
+        }
+
         setSlideName('');
       } catch (error) {
         console.error('[Control] Error converting image to base64:', error);
-        Alert.alert(t('error'), 'Failed to process image');
+        Alert.alert(t('error'), t('imageProcessError') || 'Failed to process image');
+      } finally {
+        setIsProcessingImage(false);
       }
     }
   };
 
-  const syncContent = (qrItems: QRItem[], slideItems: SlideItem[]) => {
-    controlClient.send({
-      type: 'content_update',
-      qrItems,
-      slideItems,
-    });
-  };
-
   const handleRemoveQR = (id: string) => {
-    removeQRItem(id);
+    // Mark as deleting
+    setDeletingItemIds(prev => new Set(prev).add(id));
+
     const updatedQRs = content.qrItems.filter((item) => item.id !== id);
+    removeQRItem(id);
     saveContent(updatedQRs, content.slideItems);
-    syncContent(updatedQRs, content.slideItems);
+
+    // Sync to TV if connected
+    if (isConnected) {
+      syncContentToTV(updatedQRs, content.slideItems);
+    } else {
+      setDeletingItemIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(id);
+        return newSet;
+      });
+    }
   };
 
   const handleRemoveSlide = (id: string) => {
-    removeSlideItem(id);
+    // Mark as deleting
+    setDeletingItemIds(prev => new Set(prev).add(id));
+
     const updatedSlides = content.slideItems.filter((item) => item.id !== id);
+    removeSlideItem(id);
     saveContent(content.qrItems, updatedSlides);
-    syncContent(content.qrItems, updatedSlides);
+
+    // Sync to TV if connected
+    if (isConnected) {
+      syncContentToTV(content.qrItems, updatedSlides);
+    } else {
+      setDeletingItemIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(id);
+        return newSet;
+      });
+    }
   };
 
   const handleStartPresentation = () => {
@@ -410,7 +512,15 @@ export default function ControlScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.logo}>{t('appName')}</Text>
+        <View style={styles.headerLeft}>
+          <Text style={styles.logo}>{t('appName')}</Text>
+          {isSyncing && (
+            <View style={styles.syncBadge}>
+              <ActivityIndicator size="small" color="#F59E0B" />
+              <Text style={styles.syncBadgeText}>{t('syncing') || 'Sincronizando'}</Text>
+            </View>
+          )}
+        </View>
         <TouchableOpacity style={styles.disconnectButton} onPress={handleDisconnect}>
           <Text style={styles.disconnectButtonText}>{t('disconnect') || 'Desconectar'}</Text>
         </TouchableOpacity>
@@ -467,25 +577,41 @@ export default function ControlScreen() {
               </View>
             ) : (
               <View style={styles.itemsList}>
-                {content.qrItems.map((item) => (
-                  <View key={item.id} style={styles.itemCard}>
-                    <View style={styles.itemQR}>
-                      <QRCode value={item.url} size={50} color="#000" backgroundColor="#FFF" />
+                {content.qrItems.map((item) => {
+                  const itemSyncStatus: SyncStatus | undefined = deletingItemIds.has(item.id)
+                    ? 'deleting'
+                    : syncingItemIds.has(item.id)
+                    ? 'syncing'
+                    : item.syncStatus;
+
+                  return (
+                    <View key={item.id} style={[styles.itemCard, itemSyncStatus === 'deleting' && styles.itemCardDeleting]}>
+                      <View style={styles.itemQR}>
+                        <QRCode value={item.url} size={50} color="#000" backgroundColor="#FFF" />
+                      </View>
+                      <View style={styles.itemInfo}>
+                        <View style={styles.itemNameRow}>
+                          <Text style={styles.itemName}>{item.name}</Text>
+                          <SyncIndicator status={itemSyncStatus} />
+                        </View>
+                        <Text style={styles.itemUrl} numberOfLines={1}>
+                          {item.url}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.deleteButton}
+                        onPress={() => handleRemoveQR(item.id)}
+                        disabled={itemSyncStatus === 'deleting'}
+                      >
+                        {itemSyncStatus === 'deleting' ? (
+                          <ActivityIndicator size="small" color="#EF4444" />
+                        ) : (
+                          <Text style={styles.deleteButtonText}>✕</Text>
+                        )}
+                      </TouchableOpacity>
                     </View>
-                    <View style={styles.itemInfo}>
-                      <Text style={styles.itemName}>{item.name}</Text>
-                      <Text style={styles.itemUrl} numberOfLines={1}>
-                        {item.url}
-                      </Text>
-                    </View>
-                    <TouchableOpacity
-                      style={styles.deleteButton}
-                      onPress={() => handleRemoveQR(item.id)}
-                    >
-                      <Text style={styles.deleteButtonText}>✕</Text>
-                    </TouchableOpacity>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             )}
           </View>
@@ -499,9 +625,25 @@ export default function ControlScreen() {
                 value={slideName}
                 onChangeText={setSlideName}
               />
-              <TouchableOpacity style={styles.addButton} onPress={handlePickImage}>
-                <Text style={styles.addButtonText}>{t('selectImage')}</Text>
+              <TouchableOpacity
+                style={[styles.addButton, isProcessingImage && styles.addButtonDisabled]}
+                onPress={handlePickImage}
+                disabled={isProcessingImage}
+              >
+                {isProcessingImage ? (
+                  <View style={styles.processingRow}>
+                    <ActivityIndicator size="small" color="#2DD4BF" />
+                    <Text style={[styles.addButtonText, { marginLeft: 8 }]}>
+                      {t('processing') || 'Procesando...'}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={styles.addButtonText}>{t('selectImage')}</Text>
+                )}
               </TouchableOpacity>
+              <Text style={styles.imageFormatHint}>
+                {t('imageFormatHint') || 'Formato: 16:9'}
+              </Text>
             </View>
 
             {content.slideItems.length === 0 ? (
@@ -511,20 +653,36 @@ export default function ControlScreen() {
               </View>
             ) : (
               <View style={styles.itemsList}>
-                {content.slideItems.map((item) => (
-                  <View key={item.id} style={styles.itemCard}>
-                    <Image source={{ uri: item.imageUri }} style={styles.itemImage} />
-                    <View style={styles.itemInfo}>
-                      <Text style={styles.itemName}>{item.name}</Text>
+                {content.slideItems.map((item) => {
+                  const itemSyncStatus: SyncStatus | undefined = deletingItemIds.has(item.id)
+                    ? 'deleting'
+                    : syncingItemIds.has(item.id)
+                    ? 'syncing'
+                    : item.syncStatus;
+
+                  return (
+                    <View key={item.id} style={[styles.itemCard, itemSyncStatus === 'deleting' && styles.itemCardDeleting]}>
+                      <Image source={{ uri: item.imageUri }} style={styles.itemImage} />
+                      <View style={styles.itemInfo}>
+                        <View style={styles.itemNameRow}>
+                          <Text style={styles.itemName}>{item.name}</Text>
+                          <SyncIndicator status={itemSyncStatus} />
+                        </View>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.deleteButton}
+                        onPress={() => handleRemoveSlide(item.id)}
+                        disabled={itemSyncStatus === 'deleting'}
+                      >
+                        {itemSyncStatus === 'deleting' ? (
+                          <ActivityIndicator size="small" color="#EF4444" />
+                        ) : (
+                          <Text style={styles.deleteButtonText}>✕</Text>
+                        )}
+                      </TouchableOpacity>
                     </View>
-                    <TouchableOpacity
-                      style={styles.deleteButton}
-                      onPress={() => handleRemoveSlide(item.id)}
-                    >
-                      <Text style={styles.deleteButtonText}>✕</Text>
-                    </TouchableOpacity>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             )}
           </View>
@@ -559,6 +717,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingVertical: 16,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  syncBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 6,
+  },
+  syncBadgeText: {
+    fontSize: 12,
+    color: '#F59E0B',
   },
   logo: {
     fontSize: 24,
@@ -754,10 +930,23 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: 'center',
   },
+  addButtonDisabled: {
+    opacity: 0.6,
+  },
   addButtonText: {
     fontSize: 16,
     color: '#2DD4BF',
     fontWeight: 'bold',
+  },
+  processingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  imageFormatHint: {
+    fontSize: 12,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: 8,
   },
   emptyState: {
     alignItems: 'center',
@@ -783,6 +972,14 @@ const styles = StyleSheet.create({
     padding: 12,
     borderWidth: 1,
     borderColor: '#2D2D3A',
+  },
+  itemCardDeleting: {
+    opacity: 0.5,
+    borderColor: '#EF4444',
+  },
+  itemNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   itemQR: {
     width: 50,
