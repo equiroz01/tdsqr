@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import QRCode from 'react-native-qrcode-svg';
@@ -346,22 +347,70 @@ export default function ControlScreen() {
       mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [16, 9],
-      quality: 0.6,
+      quality: 0.8,
     });
 
     if (!result.canceled && result.assets[0]) {
       setIsProcessingImage(true);
 
       try {
-        // Convert image to base64 for network transfer
-        const base64 = await FileSystem.readAsStringAsync(result.assets[0].uri, {
+        const originalUri = result.assets[0].uri;
+        const originalWidth = result.assets[0].width;
+        const originalHeight = result.assets[0].height;
+
+        // Calculate crop dimensions for 16:9 aspect ratio
+        const targetAspect = 16 / 9;
+        const currentAspect = originalWidth / originalHeight;
+
+        let cropWidth = originalWidth;
+        let cropHeight = originalHeight;
+        let cropX = 0;
+        let cropY = 0;
+
+        if (currentAspect > targetAspect) {
+          // Image is wider than 16:9, crop width
+          cropWidth = Math.round(originalHeight * targetAspect);
+          cropX = Math.round((originalWidth - cropWidth) / 2);
+        } else if (currentAspect < targetAspect) {
+          // Image is taller than 16:9, crop height
+          cropHeight = Math.round(originalWidth / targetAspect);
+          cropY = Math.round((originalHeight - cropHeight) / 2);
+        }
+
+        // Crop and resize image to 16:9 format (max 1920x1080 for performance)
+        const manipulatedImage = await ImageManipulator.manipulateAsync(
+          originalUri,
+          [
+            {
+              crop: {
+                originX: cropX,
+                originY: cropY,
+                width: cropWidth,
+                height: cropHeight,
+              },
+            },
+            {
+              resize: {
+                width: Math.min(cropWidth, 1920),
+                height: Math.min(cropHeight, 1080),
+              },
+            },
+          ],
+          {
+            compress: 0.7,
+            format: ImageManipulator.SaveFormat.JPEG,
+          }
+        );
+
+        // Convert processed image to base64
+        const base64 = await FileSystem.readAsStringAsync(manipulatedImage.uri, {
           encoding: FileSystem.EncodingType.Base64,
         });
 
         const newSlide: SlideItem = {
           id: Date.now().toString(),
           name: slideName || `Slide ${content.slideItems.length + 1}`,
-          imageUri: result.assets[0].uri,
+          imageUri: manipulatedImage.uri,
           imageBase64: `data:image/jpeg;base64,${base64}`,
           createdAt: Date.now(),
           syncStatus: 'pending',
@@ -378,7 +427,7 @@ export default function ControlScreen() {
 
         setSlideName('');
       } catch (error) {
-        console.error('[Control] Error converting image to base64:', error);
+        console.error('[Control] Error processing image:', error);
         Alert.alert(t('error'), t('imageProcessError') || 'Failed to process image');
       } finally {
         setIsProcessingImage(false);
@@ -508,6 +557,13 @@ export default function ControlScreen() {
         >
           <Text style={styles.manualButtonText}>{t('enterPinManually')}</Text>
         </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.backToHomeButton}
+          onPress={() => router.replace('/')}
+        >
+          <Text style={styles.backToHomeButtonText}>{t('back') || 'Volver'}</Text>
+        </TouchableOpacity>
       </SafeAreaView>
     );
   }
@@ -567,6 +623,13 @@ export default function ControlScreen() {
             }}
           >
             <Text style={styles.secondaryButtonText}>{t('backToScan')}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.backToHomeButton}
+            onPress={() => router.replace('/')}
+          >
+            <Text style={styles.backToHomeButtonText}>{t('back') || 'Volver'}</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -950,6 +1013,19 @@ const styles = StyleSheet.create({
   manualButtonText: {
     fontSize: 14,
     color: '#5EEAD4',
+    textAlign: 'center',
+  },
+  backToHomeButton: {
+    marginTop: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderWidth: 1,
+    borderColor: '#4B5563',
+    borderRadius: 8,
+  },
+  backToHomeButtonText: {
+    fontSize: 14,
+    color: '#9CA3AF',
     textAlign: 'center',
   },
   manualForm: {

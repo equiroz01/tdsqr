@@ -194,7 +194,15 @@ export default function TVScreen() {
           setTVState('connected');
         } else {
           setConnected(false);
-          setTVState('waiting');
+          // When controller disconnects, keep presenting if we have content
+          // Only go back to waiting if we're not currently presenting
+          setTVState((currentState) => {
+            if (currentState === 'presenting') {
+              // Keep presenting - content is saved locally
+              return 'presenting';
+            }
+            return 'waiting';
+          });
         }
       });
 
@@ -372,6 +380,21 @@ export default function TVScreen() {
             <Text style={styles.statusText}>{t('waitingConnection')}</Text>
           </View>
 
+          {/* Show button to start presentation if we have saved content */}
+          {allContent.length > 0 && (
+            <TouchableOpacity
+              style={styles.startLocalButton}
+              onPress={() => {
+                setTVState('presenting');
+                setCurrentSlideIndex(0);
+              }}
+            >
+              <Text style={styles.startLocalButtonText}>
+                {t('startWithSavedContent') || `Iniciar presentación (${allContent.length} elementos)`}
+              </Text>
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity style={styles.exitButton} onPress={() => { tvServer.stop(); router.replace('/'); }}>
             <Text style={styles.exitButtonText}>{t('exit') || 'Salir'}</Text>
           </TouchableOpacity>
@@ -388,12 +411,41 @@ export default function TVScreen() {
         <View style={styles.connectedContainer}>
           <Text style={styles.connectedIcon}>✓</Text>
           <Text style={styles.connectedTitle}>{t('connected')}</Text>
-          <Text style={styles.connectedSubtitle}>
-            {t('waitingContent')}
-          </Text>
-          <Text style={styles.connectedHint}>
-            {t('addContentHint')}
-          </Text>
+
+          {/* Show saved content info if available */}
+          {allContent.length > 0 ? (
+            <View style={styles.savedContentContainer}>
+              <Text style={styles.savedContentText}>
+                {t('savedContent') || 'Contenido guardado'}
+              </Text>
+              <View style={styles.savedContentInfo}>
+                <Text style={styles.savedContentCount}>
+                  {localContent.qrItems.length > 0 && `${localContent.qrItems.length} QR`}
+                  {localContent.qrItems.length > 0 && localContent.slideItems.length > 0 && ' • '}
+                  {localContent.slideItems.length > 0 && `${localContent.slideItems.length} ${t('images') || 'imágenes'}`}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.playButton}
+                onPress={() => {
+                  setTVState('presenting');
+                  setCurrentSlideIndex(0);
+                }}
+              >
+                <Text style={styles.playButtonIcon}>▶</Text>
+                <Text style={styles.playButtonText}>{t('startPresentation') || 'Iniciar'}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              <Text style={styles.connectedSubtitle}>
+                {t('waitingContent')}
+              </Text>
+              <Text style={styles.connectedHint}>
+                {t('addContentHint')}
+              </Text>
+            </>
+          )}
 
           <TouchableOpacity style={styles.exitButton} onPress={() => { tvServer.stop(); router.replace('/'); }}>
             <Text style={styles.exitButtonText}>{t('exit') || 'Salir'}</Text>
@@ -622,6 +674,48 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     textAlign: 'center',
   },
+  savedContentContainer: {
+    alignItems: 'center',
+    marginTop: 16,
+    padding: 20,
+    backgroundColor: 'rgba(45, 212, 191, 0.1)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(45, 212, 191, 0.3)',
+  },
+  savedContentText: {
+    fontSize: 14,
+    color: '#9CA3AF',
+    marginBottom: 8,
+  },
+  savedContentInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  savedContentCount: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2DD4BF',
+  },
+  playButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#2DD4BF',
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    borderRadius: 12,
+    gap: 8,
+  },
+  playButtonIcon: {
+    fontSize: 16,
+    color: '#000000',
+  },
+  playButtonText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#000000',
+  },
   presentationContainer: {
     flex: 1,
     backgroundColor: '#0A0A0F',
@@ -704,6 +798,18 @@ const styles = StyleSheet.create({
   exitButtonText: {
     color: '#9CA3AF',
     fontSize: 14,
+  },
+  startLocalButton: {
+    marginTop: 24,
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    backgroundColor: '#2DD4BF',
+    borderRadius: 12,
+  },
+  startLocalButtonText: {
+    color: '#000000',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   exitZone: {
     position: 'absolute',
