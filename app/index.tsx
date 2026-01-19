@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useRootNavigationState } from 'expo-router';
 import { useTranslation } from '../src/i18n';
 import { isAndroidTV } from '../src/services/DeviceService';
 
@@ -10,20 +10,22 @@ export default function ModeSelectScreen() {
   const { t } = useTranslation();
   const [isTV, setIsTV] = useState<boolean | null>(null);
 
+  // Wait for navigation to be ready before redirecting
+  const rootNavigationState = useRootNavigationState();
+  const navigationReady = rootNavigationState?.key != null;
+
   useEffect(() => {
     // Check if running on Android TV
-    const checkDevice = () => {
-      const tvDevice = isAndroidTV();
-      setIsTV(tvDevice);
-
-      // If it's a TV, automatically redirect to TV mode
-      if (tvDevice) {
-        router.replace('/tv');
-      }
-    };
-
-    checkDevice();
+    const tvDevice = isAndroidTV();
+    setIsTV(tvDevice);
   }, []);
+
+  useEffect(() => {
+    // Only redirect when navigation is ready AND we detected a TV
+    if (navigationReady && isTV === true) {
+      router.replace('/tv');
+    }
+  }, [navigationReady, isTV]);
 
   // Show loading while checking device type
   if (isTV === null) {

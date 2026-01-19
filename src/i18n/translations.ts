@@ -46,6 +46,15 @@ export const translations = {
     noContent: 'Sin contenido',
     noContentHint: 'Añade QR codes o imágenes desde el modo Control',
     notAvailable: 'No disponible',
+    startWithSavedContent: 'Iniciar con contenido guardado',
+    savedContent: 'Contenido guardado',
+    startPresentation: 'Iniciar presentación',
+
+    // Sync Progress
+    syncingToTV: 'Sincronizando con TV...',
+    receivingContent: 'Recibiendo contenido...',
+    pleaseWait: 'Por favor espera...',
+    syncComplete: 'Sincronización completada',
 
     // Control Screen
     controlModeTitle: 'Modo Control',
@@ -91,6 +100,31 @@ export const translations = {
     portuguese: 'Portugués',
     about: 'Acerca de',
     version: 'Versión',
+
+    // Templates / Boards
+    templates: 'Plantillas',
+    selectTemplate: 'Seleccionar Plantilla',
+    selectBoardHint: 'Selecciona una plantilla para sincronizar con el TV',
+    noBoards: 'Sin plantillas',
+    createBoardHint: 'Crea tu primera plantilla para organizar tu contenido',
+    createBoard: 'Crear Plantilla',
+    newBoard: 'Nueva Plantilla',
+    editBoard: 'Editar Plantilla',
+    deleteBoard: 'Eliminar Plantilla',
+    deleteBoardConfirm: '¿Estás seguro de que deseas eliminar "{name}"?',
+    boardName: 'Nombre de la plantilla',
+    boardDescription: 'Descripción (opcional)',
+    boardInfo: 'Información de Plantilla',
+    currentTemplate: 'Plantilla',
+    change: 'Cambiar',
+    untitled: 'Sin título',
+    longPressToDelete: 'Mantén presionado para eliminar',
+    enterBoardName: 'Ingresa un nombre para la plantilla',
+    saveFailed: 'Error al guardar la plantilla',
+    unsavedChanges: 'Cambios sin guardar',
+    unsavedChangesConfirm: 'Tienes cambios sin guardar. ¿Estás seguro de que deseas salir?',
+    discard: 'Descartar',
+    presentationSettings: 'Configuración de Presentación',
   },
 
   en: {
@@ -138,6 +172,15 @@ export const translations = {
     noContent: 'No content',
     noContentHint: 'Add QR codes or images from Control mode',
     notAvailable: 'Not available',
+    startWithSavedContent: 'Start with saved content',
+    savedContent: 'Saved content',
+    startPresentation: 'Start presentation',
+
+    // Sync Progress
+    syncingToTV: 'Syncing with TV...',
+    receivingContent: 'Receiving content...',
+    pleaseWait: 'Please wait...',
+    syncComplete: 'Sync complete',
 
     // Control Screen
     controlModeTitle: 'Control Mode',
@@ -183,6 +226,31 @@ export const translations = {
     portuguese: 'Portuguese',
     about: 'About',
     version: 'Version',
+
+    // Templates / Boards
+    templates: 'Templates',
+    selectTemplate: 'Select Template',
+    selectBoardHint: 'Select a template to sync with the TV',
+    noBoards: 'No templates yet',
+    createBoardHint: 'Create your first template to organize your content',
+    createBoard: 'Create Template',
+    newBoard: 'New Template',
+    editBoard: 'Edit Template',
+    deleteBoard: 'Delete Template',
+    deleteBoardConfirm: 'Are you sure you want to delete "{name}"?',
+    boardName: 'Template name',
+    boardDescription: 'Description (optional)',
+    boardInfo: 'Template Info',
+    currentTemplate: 'Template',
+    change: 'Change',
+    untitled: 'Untitled',
+    longPressToDelete: 'Long press to delete',
+    enterBoardName: 'Please enter a template name',
+    saveFailed: 'Failed to save template',
+    unsavedChanges: 'Unsaved Changes',
+    unsavedChangesConfirm: 'You have unsaved changes. Are you sure you want to leave?',
+    discard: 'Discard',
+    presentationSettings: 'Presentation Settings',
   },
 
   pt: {
@@ -230,6 +298,15 @@ export const translations = {
     noContent: 'Sem conteúdo',
     noContentHint: 'Adicione códigos QR ou imagens do modo Controle',
     notAvailable: 'Não disponível',
+    startWithSavedContent: 'Iniciar com conteúdo salvo',
+    savedContent: 'Conteúdo salvo',
+    startPresentation: 'Iniciar apresentação',
+
+    // Sync Progress
+    syncingToTV: 'Sincronizando com a TV...',
+    receivingContent: 'Recebendo conteúdo...',
+    pleaseWait: 'Por favor aguarde...',
+    syncComplete: 'Sincronização concluída',
 
     // Control Screen
     controlModeTitle: 'Modo Controle',
@@ -275,6 +352,31 @@ export const translations = {
     portuguese: 'Português',
     about: 'Sobre',
     version: 'Versão',
+
+    // Templates / Boards
+    templates: 'Modelos',
+    selectTemplate: 'Selecionar Modelo',
+    selectBoardHint: 'Selecione um modelo para sincronizar com a TV',
+    noBoards: 'Sem modelos',
+    createBoardHint: 'Crie seu primeiro modelo para organizar seu conteúdo',
+    createBoard: 'Criar Modelo',
+    newBoard: 'Novo Modelo',
+    editBoard: 'Editar Modelo',
+    deleteBoard: 'Excluir Modelo',
+    deleteBoardConfirm: 'Tem certeza de que deseja excluir "{name}"?',
+    boardName: 'Nome do modelo',
+    boardDescription: 'Descrição (opcional)',
+    boardInfo: 'Informações do Modelo',
+    currentTemplate: 'Modelo',
+    change: 'Alterar',
+    untitled: 'Sem título',
+    longPressToDelete: 'Pressione e segure para excluir',
+    enterBoardName: 'Digite um nome para o modelo',
+    saveFailed: 'Erro ao salvar o modelo',
+    unsavedChanges: 'Alterações não salvas',
+    unsavedChangesConfirm: 'Você tem alterações não salvas. Tem certeza de que deseja sair?',
+    discard: 'Descartar',
+    presentationSettings: 'Configurações de Apresentação',
   },
 } as const;
 

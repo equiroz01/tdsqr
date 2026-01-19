@@ -25,3 +25,14 @@ export interface PresentationSettings {
   showIndicators: boolean;
   transition: TransitionType;
 }
+
+export interface MenuBoard {
+  id: string;
+  name: string;
+  description?: string;
+  qrItems: QRItem[];
+  slideItems: SlideItem[];
+  settings: PresentationSettings;
+  createdAt: number;
+  updatedAt: number;
+}

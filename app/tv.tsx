@@ -9,6 +9,8 @@ import { getLocalIP, generatePIN, PORT } from '../src/services/NetworkService';
 import { tvServer } from '../src/services/TCPCommunication';
 import { QRItem, SlideItem, TransitionType } from '../src/types';
 import { useTranslation } from '../src/i18n';
+import { wp, hp, sp, ms, widthPercent, heightPercent, screenInfo, responsive } from '../src/utils/responsive';
+import { SyncProgress } from '../src/components/SyncProgress';
 
 const TV_STORAGE_KEY = '@tdsqr/tv_content';
 const TV_SETTINGS_KEY = '@tdsqr/tv_settings';
@@ -16,6 +18,12 @@ const TV_SETTINGS_KEY = '@tdsqr/tv_settings';
 const { width, height } = Dimensions.get('window');
 
 type TVState = 'loading' | 'waiting' | 'connected' | 'presenting';
+
+// Calculate QR code size based on screen
+const getQRSize = (multiplier: number = 0.5) => {
+  const maxSize = Math.min(width, height) * multiplier;
+  return Math.min(maxSize, screenInfo.isTV ? 500 : 300);
+};
 
 export default function TVScreen() {
   const { setMode, setConnected, setConnectionInfo, content, setContent, setInterval, setTransition } = useApp();
@@ -34,6 +42,15 @@ export default function TVScreen() {
   const [lastTapTime, setLastTapTime] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
 
+  // Sync progress state
+  const [showSyncProgress, setShowSyncProgress] = useState(false);
+  const [syncProgress, setSyncProgress] = useState(0);
+  const [currentSyncItem, setCurrentSyncItem] = useState(0);
+  const [totalSyncItems, setTotalSyncItems] = useState(0);
+  const [pendingQRItems, setPendingQRItems] = useState<QRItem[]>([]);
+  const [pendingSlideItems, setPendingSlideItems] = useState<SlideItem[]>([]);
+  const [syncSettings, setSyncSettings] = useState<{ interval: number; transition: TransitionType } | null>(null);
+
   // Animation refs
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
@@ -50,7 +67,7 @@ export default function TVScreen() {
         setLocalContent(parsed);
         setContent(parsed.qrItems || [], parsed.slideItems || []);
         if ((parsed.qrItems?.length || 0) + (parsed.slideItems?.length || 0) > 0) {
-          return true; // Has content
+          return true;
         }
       }
     } catch (error) {
@@ -140,7 +157,6 @@ export default function TVScreen() {
   const handleExitTap = () => {
     const now = Date.now();
     if (now - lastTapTime > 2000) {
-      // Reset if more than 2 seconds passed
       setExitTapCount(1);
     } else {
       setExitTapCount((prev) => prev + 1);
@@ -148,7 +164,6 @@ export default function TVScreen() {
     setLastTapTime(now);
 
     if (exitTapCount >= 4) {
-      // 5th tap
       tvServer.stop();
       router.replace('/');
     }
@@ -157,13 +172,11 @@ export default function TVScreen() {
   useEffect(() => {
     setMode('tv');
 
-    // Load saved content and settings first
     loadSavedContent();
     loadSavedSettings();
 
-    // Prevent back button on TV (stay in TV mode)
     const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
-      return true; // Prevent going back
+      return true;
     });
 
     initializeServer();
@@ -181,12 +194,10 @@ export default function TVScreen() {
 
       console.log('[TV] Starting TCP server with PIN:', generatedPin);
 
-      // Start TCP server
       const ip = await tvServer.start(generatedPin);
       setLocalIP(ip);
       setConnectionInfo({ ip, pin: generatedPin });
 
-      // Handle connection status
       tvServer.onConnection((connected) => {
         console.log('[TV] Connection status:', connected);
         if (connected) {
@@ -194,11 +205,8 @@ export default function TVScreen() {
           setTVState('connected');
         } else {
           setConnected(false);
-          // When controller disconnects, keep presenting if we have content
-          // Only go back to waiting if we're not currently presenting
           setTVState((currentState) => {
             if (currentState === 'presenting') {
-              // Keep presenting - content is saved locally
               return 'presenting';
             }
             return 'waiting';
@@ -206,7 +214,6 @@ export default function TVScreen() {
         }
       });
 
-      // Handle incoming messages
       tvServer.onMessage((data) => {
         handleMessage(data);
       });
@@ -217,7 +224,6 @@ export default function TVScreen() {
       console.error('[TV] Failed to initialize server:', error);
       setServerError(error.message || 'Error starting server');
 
-      // Try to get IP anyway for display
       try {
         const ip = await getLocalIP();
         setLocalIP(ip);
@@ -225,7 +231,6 @@ export default function TVScreen() {
         setLocalIP(t('notAvailable'));
       }
 
-      // Retry after delay
       setTimeout(() => {
         initializeServer();
       }, 5000);
@@ -236,23 +241,81 @@ export default function TVScreen() {
     console.log('[TV] Received message:', data.type);
 
     switch (data.type) {
+      case 'sync_start':
+        // New progressive sync started
+        setIsSyncing(true);
+        setShowSyncProgress(true);
+        setSyncProgress(0);
+        setCurrentSyncItem(0);
+        setTotalSyncItems(data.totalItems || 0);
+        setPendingQRItems([]);
+        setPendingSlideItems([]);
+        if (data.settings) {
+          setSyncSettings(data.settings);
+        }
+        break;
+
+      case 'sync_item':
+        // Received an individual item
+        const itemIndex = data.index + 1;
+        const totalItems = data.total;
+        setCurrentSyncItem(itemIndex);
+        setSyncProgress(Math.round((itemIndex / totalItems) * 100));
+
+        if (data.itemType === 'qr') {
+          setPendingQRItems(prev => [...prev, data.item]);
+        } else {
+          setPendingSlideItems(prev => [...prev, data.item]);
+        }
+        break;
+
+      case 'sync_complete':
+        // Sync finished, apply all pending items
+        setLocalContent({ qrItems: pendingQRItems, slideItems: pendingSlideItems });
+        setContent(pendingQRItems, pendingSlideItems);
+        saveContentToStorage(pendingQRItems, pendingSlideItems);
+
+        if (syncSettings) {
+          if (syncSettings.interval) setInterval(syncSettings.interval);
+          if (syncSettings.transition) setTransition(syncSettings.transition);
+          saveSettingsToStorage(syncSettings.interval || 5, syncSettings.transition || 'fade');
+        }
+
+        tvServer.sendToAll({ type: 'content_received' });
+
+        // Keep progress visible briefly
+        setTimeout(() => {
+          setShowSyncProgress(false);
+          setIsSyncing(false);
+          setSyncProgress(0);
+          setPendingQRItems([]);
+          setPendingSlideItems([]);
+          setSyncSettings(null);
+        }, 500);
+
+        if (pendingQRItems.length > 0 || pendingSlideItems.length > 0) {
+          setTVState('presenting');
+          setCurrentSlideIndex(0);
+        } else {
+          setTVState('connected');
+        }
+        break;
+
       case 'content_update':
+        // Legacy full content update (for backwards compatibility)
         setIsSyncing(true);
         const newQRItems = data.qrItems || [];
         const newSlideItems = data.slideItems || [];
         setLocalContent({ qrItems: newQRItems, slideItems: newSlideItems });
         setContent(newQRItems, newSlideItems);
-        // Save content for persistence (works without connection)
         saveContentToStorage(newQRItems, newSlideItems);
 
-        // Apply settings if included
         if (data.settings) {
           if (data.settings.interval) setInterval(data.settings.interval);
           if (data.settings.transition) setTransition(data.settings.transition);
           saveSettingsToStorage(data.settings.interval || 5, data.settings.transition || 'fade');
         }
 
-        // Confirm receipt to controller
         tvServer.sendToAll({ type: 'content_received' });
         setIsSyncing(false);
 
@@ -303,14 +366,12 @@ export default function TVScreen() {
         }
         break;
     }
-  }, [allContent.length]);
+  }, [allContent.length, pendingQRItems, pendingSlideItems, syncSettings]);
 
-  // Stop presentation and go back to connected/waiting state
   const handleStopPresentation = () => {
     setTVState(tvServer.isClientConnected() ? 'connected' : 'waiting');
   };
 
-  // Auto-advance slides with transition
   useEffect(() => {
     if (tvState !== 'presenting' || allContent.length <= 1 || !content.isPlaying) {
       return;
@@ -349,7 +410,7 @@ export default function TVScreen() {
           <View style={styles.qrContainer}>
             <QRCode
               value={connectionUrl}
-              size={Math.min(width * 0.5, 300)}
+              size={getQRSize(0.35)}
               color="#000000"
               backgroundColor="#FFFFFF"
             />
@@ -380,7 +441,6 @@ export default function TVScreen() {
             <Text style={styles.statusText}>{t('waitingConnection')}</Text>
           </View>
 
-          {/* Show button to start presentation if we have saved content */}
           {allContent.length > 0 && (
             <TouchableOpacity
               style={styles.startLocalButton}
@@ -399,7 +459,6 @@ export default function TVScreen() {
             <Text style={styles.exitButtonText}>{t('exit') || 'Salir'}</Text>
           </TouchableOpacity>
         </View>
-        {/* Exit tap zone - top left corner */}
         <Pressable style={styles.exitZone} onPress={handleExitTap} />
       </SafeAreaView>
     );
@@ -412,7 +471,6 @@ export default function TVScreen() {
           <Text style={styles.connectedIcon}>✓</Text>
           <Text style={styles.connectedTitle}>{t('connected')}</Text>
 
-          {/* Show saved content info if available */}
           {allContent.length > 0 ? (
             <View style={styles.savedContentContainer}>
               <Text style={styles.savedContentText}>
@@ -451,7 +509,6 @@ export default function TVScreen() {
             <Text style={styles.exitButtonText}>{t('exit') || 'Salir'}</Text>
           </TouchableOpacity>
         </View>
-        {/* Exit tap zone - top left corner */}
         <Pressable style={styles.exitZone} onPress={handleExitTap} />
       </SafeAreaView>
     );
@@ -467,7 +524,6 @@ export default function TVScreen() {
             {t('noContentHint')}
           </Text>
         </View>
-        {/* Exit tap zone - top left corner */}
         <Pressable style={styles.exitZone} onPress={handleExitTap} />
       </SafeAreaView>
     );
@@ -492,7 +548,7 @@ export default function TVScreen() {
             <View style={styles.qrSlideCode}>
               <QRCode
                 value={(currentItem as QRItem).url}
-                size={Math.min(width * 0.7, height * 0.6)}
+                size={getQRSize(0.6)}
                 color="#000000"
                 backgroundColor="#FFFFFF"
               />
@@ -509,15 +565,6 @@ export default function TVScreen() {
         )}
       </Animated.View>
 
-      {/* Syncing indicator */}
-      {isSyncing && (
-        <View style={styles.syncingOverlay}>
-          <ActivityIndicator size="large" color="#2DD4BF" />
-          <Text style={styles.syncingText}>{t('syncing') || 'Sincronizando...'}</Text>
-        </View>
-      )}
-
-      {/* Slide indicators */}
       {allContent.length > 1 && (
         <View style={styles.indicators}>
           {allContent.map((_, index) => (
@@ -532,13 +579,22 @@ export default function TVScreen() {
         </View>
       )}
 
-      {/* Stop presentation button - bottom right corner */}
       <TouchableOpacity style={styles.stopPresentationButton} onPress={handleStopPresentation}>
         <Text style={styles.stopPresentationText}>✕</Text>
       </TouchableOpacity>
 
-      {/* Exit tap zone - top left corner */}
       <Pressable style={styles.exitZone} onPress={handleExitTap} />
+
+      {/* Sync Progress Modal */}
+      <SyncProgress
+        visible={showSyncProgress}
+        progress={syncProgress}
+        currentItem={currentSyncItem}
+        totalItems={totalSyncItems}
+        status="receiving"
+        title={t('receivingContent') || 'Recibiendo contenido...'}
+        subtitle={t('pleaseWait') || 'Por favor espera...'}
+      />
     </View>
   );
 }
@@ -552,47 +608,48 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     color: '#9CA3AF',
-    fontSize: 16,
-    marginTop: 16,
+    fontSize: sp(16),
+    marginTop: ms(16),
   },
   errorText: {
     color: '#EF4444',
-    fontSize: 14,
-    marginTop: 8,
+    fontSize: sp(14),
+    marginTop: ms(8),
     textAlign: 'center',
-    paddingHorizontal: 20,
+    paddingHorizontal: ms(20),
   },
   waitingContainer: {
     alignItems: 'center',
-    paddingHorizontal: 40,
+    paddingHorizontal: ms(40),
+    maxWidth: widthPercent(90),
   },
   logo: {
-    fontSize: 32,
+    fontSize: sp(32),
     fontWeight: 'bold',
     color: '#2DD4BF',
-    marginBottom: 8,
+    marginBottom: ms(8),
   },
   title: {
-    fontSize: 18,
+    fontSize: sp(18),
     color: '#FFFFFF',
-    marginBottom: 40,
+    marginBottom: ms(30),
   },
   qrContainer: {
     backgroundColor: '#FFFFFF',
-    padding: 20,
-    borderRadius: 16,
-    marginBottom: 24,
+    padding: ms(20),
+    borderRadius: ms(16),
+    marginBottom: ms(20),
   },
   instruction: {
-    fontSize: 16,
+    fontSize: sp(16),
     color: '#9CA3AF',
     textAlign: 'center',
-    marginBottom: 24,
+    marginBottom: ms(20),
   },
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: ms(20),
     width: '100%',
   },
   dividerLine: {
@@ -602,35 +659,35 @@ const styles = StyleSheet.create({
   },
   dividerText: {
     color: '#6B7280',
-    paddingHorizontal: 16,
-    fontSize: 14,
+    paddingHorizontal: ms(16),
+    fontSize: sp(14),
   },
   pinContainer: {
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: ms(20),
   },
   pinLabel: {
-    fontSize: 14,
+    fontSize: sp(14),
     color: '#9CA3AF',
-    marginBottom: 8,
+    marginBottom: ms(8),
   },
   pin: {
-    fontSize: 48,
+    fontSize: sp(48),
     fontWeight: 'bold',
     color: '#2DD4BF',
-    letterSpacing: 8,
+    letterSpacing: ms(8),
   },
   infoContainer: {
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: ms(24),
   },
   infoLabel: {
-    fontSize: 12,
+    fontSize: sp(12),
     color: '#6B7280',
-    marginBottom: 4,
+    marginBottom: ms(4),
   },
   infoValue: {
-    fontSize: 14,
+    fontSize: sp(14),
     color: '#9CA3AF',
   },
   statusContainer: {
@@ -638,63 +695,64 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: ms(10),
+    height: ms(10),
+    borderRadius: ms(5),
     backgroundColor: '#2DD4BF',
-    marginRight: 8,
+    marginRight: ms(8),
   },
   statusText: {
-    fontSize: 14,
+    fontSize: sp(14),
     color: '#9CA3AF',
   },
   connectedContainer: {
     alignItems: 'center',
-    paddingHorizontal: 40,
+    paddingHorizontal: ms(40),
+    maxWidth: widthPercent(90),
   },
   connectedIcon: {
-    fontSize: 64,
+    fontSize: sp(64),
     color: '#2DD4BF',
-    marginBottom: 16,
+    marginBottom: ms(16),
   },
   connectedTitle: {
-    fontSize: 32,
+    fontSize: sp(32),
     fontWeight: 'bold',
     color: '#FFFFFF',
-    marginBottom: 8,
+    marginBottom: ms(8),
   },
   connectedSubtitle: {
-    fontSize: 18,
+    fontSize: sp(18),
     color: '#9CA3AF',
     textAlign: 'center',
-    marginBottom: 16,
+    marginBottom: ms(16),
   },
   connectedHint: {
-    fontSize: 14,
+    fontSize: sp(14),
     color: '#6B7280',
     textAlign: 'center',
   },
   savedContentContainer: {
     alignItems: 'center',
-    marginTop: 16,
-    padding: 20,
+    marginTop: ms(16),
+    padding: ms(20),
     backgroundColor: 'rgba(45, 212, 191, 0.1)',
-    borderRadius: 16,
+    borderRadius: ms(16),
     borderWidth: 1,
     borderColor: 'rgba(45, 212, 191, 0.3)',
   },
   savedContentText: {
-    fontSize: 14,
+    fontSize: sp(14),
     color: '#9CA3AF',
-    marginBottom: 8,
+    marginBottom: ms(8),
   },
   savedContentInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: ms(16),
   },
   savedContentCount: {
-    fontSize: 18,
+    fontSize: sp(18),
     fontWeight: 'bold',
     color: '#2DD4BF',
   },
@@ -702,17 +760,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#2DD4BF',
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-    borderRadius: 12,
-    gap: 8,
+    paddingVertical: ms(14),
+    paddingHorizontal: ms(32),
+    borderRadius: ms(12),
+    gap: ms(8),
   },
   playButtonIcon: {
-    fontSize: 16,
+    fontSize: sp(16),
     color: '#000000',
   },
   playButtonText: {
-    fontSize: 16,
+    fontSize: sp(16),
     fontWeight: 'bold',
     color: '#000000',
   },
@@ -726,23 +784,23 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 40,
+    paddingHorizontal: ms(40),
   },
   qrSlideTitle: {
-    fontSize: 32,
+    fontSize: sp(32),
     fontWeight: 'bold',
     color: '#FFFFFF',
-    marginBottom: 32,
+    marginBottom: ms(32),
     textAlign: 'center',
   },
   qrSlideCode: {
     backgroundColor: '#FFFFFF',
-    padding: 24,
-    borderRadius: 16,
-    marginBottom: 24,
+    padding: ms(24),
+    borderRadius: ms(16),
+    marginBottom: ms(24),
   },
   qrSlideUrl: {
-    fontSize: 16,
+    fontSize: sp(16),
     color: '#5EEAD4',
     textAlign: 'center',
   },
@@ -758,90 +816,90 @@ const styles = StyleSheet.create({
   },
   imageCaption: {
     position: 'absolute',
-    bottom: 60,
-    left: 20,
-    right: 20,
+    bottom: ms(60),
+    left: ms(20),
+    right: ms(20),
     backgroundColor: 'rgba(10, 10, 15, 0.85)',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 8,
+    paddingVertical: ms(12),
+    paddingHorizontal: ms(20),
+    borderRadius: ms(8),
   },
   imageCaptionText: {
-    fontSize: 18,
+    fontSize: sp(18),
     color: '#FFFFFF',
     textAlign: 'center',
   },
   indicators: {
     position: 'absolute',
-    bottom: 20,
+    bottom: ms(20),
     flexDirection: 'row',
-    gap: 8,
+    gap: ms(8),
   },
   indicator: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: ms(10),
+    height: ms(10),
+    borderRadius: ms(5),
     backgroundColor: '#2D2D3A',
   },
   indicatorActive: {
     backgroundColor: '#2DD4BF',
-    width: 24,
+    width: ms(30),
   },
   exitButton: {
-    marginTop: 32,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
+    marginTop: ms(32),
+    paddingVertical: ms(12),
+    paddingHorizontal: ms(24),
     borderWidth: 1,
     borderColor: '#4B5563',
-    borderRadius: 8,
+    borderRadius: ms(8),
   },
   exitButtonText: {
     color: '#9CA3AF',
-    fontSize: 14,
+    fontSize: sp(14),
   },
   startLocalButton: {
-    marginTop: 24,
-    paddingVertical: 16,
-    paddingHorizontal: 32,
+    marginTop: ms(24),
+    paddingVertical: ms(16),
+    paddingHorizontal: ms(32),
     backgroundColor: '#2DD4BF',
-    borderRadius: 12,
+    borderRadius: ms(12),
   },
   startLocalButtonText: {
     color: '#000000',
-    fontSize: 16,
+    fontSize: sp(16),
     fontWeight: 'bold',
   },
   exitZone: {
     position: 'absolute',
     top: 0,
     left: 0,
-    width: 80,
-    height: 80,
+    width: ms(100),
+    height: ms(100),
     backgroundColor: 'transparent',
   },
   syncingOverlay: {
     position: 'absolute',
-    top: 20,
-    right: 20,
+    top: ms(20),
+    right: ms(20),
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    gap: 8,
+    paddingHorizontal: ms(16),
+    paddingVertical: ms(8),
+    borderRadius: ms(20),
+    gap: ms(8),
   },
   syncingText: {
     color: '#2DD4BF',
-    fontSize: 14,
+    fontSize: sp(14),
   },
   stopPresentationButton: {
     position: 'absolute',
-    bottom: 20,
-    right: 20,
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    bottom: ms(20),
+    right: ms(20),
+    width: ms(48),
+    height: ms(48),
+    borderRadius: ms(24),
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
     justifyContent: 'center',
     alignItems: 'center',
@@ -850,7 +908,7 @@ const styles = StyleSheet.create({
   },
   stopPresentationText: {
     color: '#FFFFFF',
-    fontSize: 20,
+    fontSize: sp(20),
     fontWeight: 'bold',
   },
   animatedContent: {

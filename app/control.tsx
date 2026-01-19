@@ -10,19 +10,21 @@ import {
   Image,
   Dimensions,
   ActivityIndicator,
+  FlatList,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import QRCode from 'react-native-qrcode-svg';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useApp } from '../src/context/AppContext';
 import { controlClient } from '../src/services/TCPCommunication';
-import { QRItem, SlideItem, SyncStatus, TransitionType } from '../src/types';
+import { QRItem, SlideItem, SyncStatus, TransitionType, MenuBoard } from '../src/types';
 import { useTranslation } from '../src/i18n';
+import { useMenuBoards } from '../src/hooks/useMenuBoards';
+import { SyncProgress } from '../src/components/SyncProgress';
 
 const INTERVAL_OPTIONS = [3, 5, 10, 15, 30];
 const TRANSITION_OPTIONS: { value: TransitionType; label: string }[] = [
@@ -31,15 +33,9 @@ const TRANSITION_OPTIONS: { value: TransitionType; label: string }[] = [
   { value: 'slide', label: 'Deslizar' },
 ];
 
-const STORAGE_KEYS = {
-  QR_ITEMS: '@tdsqr/controller_qr_items',
-  SLIDE_ITEMS: '@tdsqr/controller_slide_items',
-  SETTINGS: '@tdsqr/controller_settings',
-};
-
 const { width } = Dimensions.get('window');
 
-type ControlState = 'scan' | 'manual' | 'connected';
+type ControlState = 'scan' | 'manual' | 'select_board' | 'connected';
 type Tab = 'qr' | 'slides';
 
 // Sync status indicator component
@@ -68,9 +64,10 @@ const SyncIndicator = ({ status }: { status?: SyncStatus }) => {
 };
 
 export default function ControlScreen() {
-  const { setMode, isConnected, setConnected, content, addQRItem, addSlideItem, removeQRItem, removeSlideItem, clearContent, setContent, setInterval, setTransition } = useApp();
+  const { setMode, isConnected, setConnected, content, setContent, setInterval, setTransition } = useApp();
   const { t } = useTranslation();
   const router = useRouter();
+  const params = useLocalSearchParams<{ selectedBoardId?: string }>();
   const [permission, requestPermission] = useCameraPermissions();
   const [controlState, setControlState] = useState<ControlState>('scan');
   const [activeTab, setActiveTab] = useState<Tab>('qr');
@@ -82,82 +79,135 @@ export default function ControlScreen() {
   const [syncingItemIds, setSyncingItemIds] = useState<Set<string>>(new Set());
   const [deletingItemIds, setDeletingItemIds] = useState<Set<string>>(new Set());
 
+  // Menu boards
+  const { boards, loading: loadingBoards, updateBoard, getBoard } = useMenuBoards();
+  const [selectedBoardId, setSelectedBoardId] = useState<string | null>(null);
+  const [currentBoard, setCurrentBoard] = useState<MenuBoard | null>(null);
+
+  // Local board state for editing
+  const [localQRItems, setLocalQRItems] = useState<QRItem[]>([]);
+  const [localSlideItems, setLocalSlideItems] = useState<SlideItem[]>([]);
+  const [localInterval, setLocalInterval] = useState(5);
+  const [localTransition, setLocalTransition] = useState<TransitionType>('fade');
+
   // QR creation form
   const [qrName, setQrName] = useState('');
   const [qrUrl, setQrUrl] = useState('');
 
   // Slide creation
   const [slideName, setSlideName] = useState('');
-  const [isLoadingContent, setIsLoadingContent] = useState(true);
   const [isProcessingImage, setIsProcessingImage] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
 
-  // Load saved content on mount
+  // Sync progress state
+  const [showSyncProgress, setShowSyncProgress] = useState(false);
+  const [syncProgress, setSyncProgress] = useState(0);
+  const [currentSyncItem, setCurrentSyncItem] = useState(0);
+  const [totalSyncItems, setTotalSyncItems] = useState(0);
+  const [syncStatus, setSyncStatus] = useState<'sending' | 'receiving' | 'processing'>('sending');
+
+  // Handle navigation with selected board
   useEffect(() => {
-    loadSavedContent();
-    loadSavedSettings();
-  }, []);
-
-  const loadSavedSettings = async () => {
-    try {
-      const data = await AsyncStorage.getItem(STORAGE_KEYS.SETTINGS);
-      if (data) {
-        const settings = JSON.parse(data);
-        if (settings.interval) setInterval(settings.interval);
-        if (settings.transition) setTransition(settings.transition);
+    if (params.selectedBoardId && isConnected) {
+      const board = getBoard(params.selectedBoardId);
+      if (board) {
+        selectBoard(board);
       }
-    } catch (error) {
-      console.error('[Control] Error loading settings:', error);
     }
+  }, [params.selectedBoardId, isConnected, boards]);
+
+  const selectBoard = (board: MenuBoard) => {
+    setSelectedBoardId(board.id);
+    setCurrentBoard(board);
+    setLocalQRItems(board.qrItems);
+    setLocalSlideItems(board.slideItems);
+    setLocalInterval(board.settings.slideInterval);
+    setLocalTransition(board.settings.transition);
+    setControlState('connected');
+
+    // Sync to TV
+    syncBoardToTV(board);
   };
 
-  const saveSettings = async (interval: number, transition: TransitionType) => {
-    try {
-      await AsyncStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify({ interval, transition }));
-    } catch (error) {
-      console.error('[Control] Error saving settings:', error);
+  const syncBoardToTV = async (board: MenuBoard) => {
+    const allItems = [...board.qrItems, ...board.slideItems];
+    const total = allItems.length;
+
+    if (total === 0) {
+      // No items, just send empty update
+      controlClient.send({
+        type: 'content_update',
+        qrItems: [],
+        slideItems: [],
+        settings: {
+          interval: board.settings.slideInterval,
+          transition: board.settings.transition,
+        },
+      });
+      return;
     }
-  };
 
-  const loadSavedContent = async () => {
-    try {
-      const [qrData, slideData] = await Promise.all([
-        AsyncStorage.getItem(STORAGE_KEYS.QR_ITEMS),
-        AsyncStorage.getItem(STORAGE_KEYS.SLIDE_ITEMS),
-      ]);
+    setIsSyncing(true);
+    setShowSyncProgress(true);
+    setSyncProgress(0);
+    setCurrentSyncItem(0);
+    setTotalSyncItems(total);
+    setSyncStatus('sending');
 
-      const savedQRs: QRItem[] = qrData ? JSON.parse(qrData) : [];
-      const savedSlides: SlideItem[] = slideData ? JSON.parse(slideData) : [];
+    const allIds = new Set([...board.qrItems.map(q => q.id), ...board.slideItems.map(s => s.id)]);
+    setSyncingItemIds(allIds);
 
-      // Load saved content into app state
-      for (const qr of savedQRs) {
-        addQRItem(qr);
-      }
-      for (const slide of savedSlides) {
-        addSlideItem(slide);
-      }
-    } catch (error) {
-      console.error('[Control] Error loading saved content:', error);
-    } finally {
-      setIsLoadingContent(false);
+    // Send sync_start message
+    controlClient.send({
+      type: 'sync_start',
+      totalItems: total,
+      settings: {
+        interval: board.settings.slideInterval,
+        transition: board.settings.transition,
+      },
+    });
+
+    // Send items one by one with delay for visual feedback
+    for (let i = 0; i < allItems.length; i++) {
+      const item = allItems[i];
+      const isQR = 'url' in item;
+
+      // Update progress
+      setCurrentSyncItem(i + 1);
+      setSyncProgress(Math.round(((i + 1) / total) * 100));
+
+      // Send item
+      controlClient.send({
+        type: 'sync_item',
+        index: i,
+        total: total,
+        itemType: isQR ? 'qr' : 'slide',
+        item: item,
+      });
+
+      // Small delay between items for visual feedback and to prevent overwhelming the connection
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
-  };
 
-  const saveContent = async (qrItems: QRItem[], slideItems: SlideItem[]) => {
-    try {
-      await Promise.all([
-        AsyncStorage.setItem(STORAGE_KEYS.QR_ITEMS, JSON.stringify(qrItems)),
-        AsyncStorage.setItem(STORAGE_KEYS.SLIDE_ITEMS, JSON.stringify(slideItems)),
-      ]);
-    } catch (error) {
-      console.error('[Control] Error saving content:', error);
-    }
+    // Send sync_complete
+    controlClient.send({
+      type: 'sync_complete',
+      qrCount: board.qrItems.length,
+      slideCount: board.slideItems.length,
+    });
+
+    // Keep progress visible briefly, then hide
+    setTimeout(() => {
+      setShowSyncProgress(false);
+      setIsSyncing(false);
+      setSyncingItemIds(new Set());
+      setSyncProgress(0);
+    }, 800);
   };
 
   useEffect(() => {
     setMode('control');
 
-    // Handle messages from TV
     controlClient.onMessage((data) => {
       handleMessage(data);
     });
@@ -165,10 +215,12 @@ export default function ControlScreen() {
     controlClient.onConnection((connected) => {
       setConnected(connected);
       if (connected) {
-        setControlState('connected');
+        setControlState('select_board');
       } else {
         setControlState('scan');
         setIsConnecting(false);
+        setSelectedBoardId(null);
+        setCurrentBoard(null);
       }
     });
 
@@ -183,13 +235,7 @@ export default function ControlScreen() {
         setIsConnecting(false);
         Alert.alert(t('connected'), t('connectionSuccess'));
         setConnected(true);
-        setControlState('connected');
-        // Send current content to TV after connecting
-        if (content.qrItems.length > 0 || content.slideItems.length > 0) {
-          setTimeout(() => {
-            syncContentToTV(content.qrItems, content.slideItems);
-          }, 500);
-        }
+        setControlState('select_board');
         break;
       case 'auth_failed':
         setIsConnecting(false);
@@ -199,67 +245,141 @@ export default function ControlScreen() {
         setScanned(false);
         break;
       case 'content_received':
-        // TV confirmed receipt of content
         setIsSyncing(false);
         setSyncingItemIds(new Set());
         setDeletingItemIds(new Set());
         console.log('[Control] TV confirmed content received');
         break;
       case 'sync_request':
-        // TV is requesting content sync
         console.log('[Control] TV requested sync');
-        syncContentToTV(content.qrItems, content.slideItems);
+        if (currentBoard) {
+          syncBoardToTV(currentBoard);
+        }
         break;
     }
   };
 
-  const syncContentToTV = (qrItems: QRItem[], slideItems: SlideItem[]) => {
-    setIsSyncing(true);
-    // Mark all items as syncing
-    const allIds = new Set([...qrItems.map(q => q.id), ...slideItems.map(s => s.id)]);
-    setSyncingItemIds(allIds);
+  const syncContentToTV = async () => {
+    if (!selectedBoardId) return;
 
-    controlClient.send({
-      type: 'content_update',
-      qrItems,
-      slideItems,
+    const allItems = [...localQRItems, ...localSlideItems];
+    const total = allItems.length;
+
+    // Save to board first
+    updateBoard(selectedBoardId, {
+      qrItems: localQRItems,
+      slideItems: localSlideItems,
       settings: {
-        interval: content.interval,
-        transition: content.transition,
+        slideInterval: localInterval,
+        autoLoop: true,
+        showIndicators: true,
+        transition: localTransition,
       },
     });
 
-    // Fallback: clear syncing state after timeout if no confirmation
+    if (total === 0) {
+      controlClient.send({
+        type: 'content_update',
+        qrItems: [],
+        slideItems: [],
+        settings: {
+          interval: localInterval,
+          transition: localTransition,
+        },
+      });
+      return;
+    }
+
+    setIsSyncing(true);
+    setShowSyncProgress(true);
+    setSyncProgress(0);
+    setCurrentSyncItem(0);
+    setTotalSyncItems(total);
+    setSyncStatus('sending');
+
+    const allIds = new Set([...localQRItems.map(q => q.id), ...localSlideItems.map(s => s.id)]);
+    setSyncingItemIds(allIds);
+
+    // Send sync_start
+    controlClient.send({
+      type: 'sync_start',
+      totalItems: total,
+      settings: {
+        interval: localInterval,
+        transition: localTransition,
+      },
+    });
+
+    // Send items one by one
+    for (let i = 0; i < allItems.length; i++) {
+      const item = allItems[i];
+      const isQR = 'url' in item;
+
+      setCurrentSyncItem(i + 1);
+      setSyncProgress(Math.round(((i + 1) / total) * 100));
+
+      controlClient.send({
+        type: 'sync_item',
+        index: i,
+        total: total,
+        itemType: isQR ? 'qr' : 'slide',
+        item: item,
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    // Send sync_complete
+    controlClient.send({
+      type: 'sync_complete',
+      qrCount: localQRItems.length,
+      slideCount: localSlideItems.length,
+    });
+
     setTimeout(() => {
+      setShowSyncProgress(false);
       setIsSyncing(false);
       setSyncingItemIds(new Set());
-    }, 5000);
+      setSyncProgress(0);
+    }, 800);
   };
 
   const handleIntervalChange = (newInterval: number) => {
-    setInterval(newInterval);
-    saveSettings(newInterval, content.transition);
-    // Send settings update to TV if connected
-    if (isConnected) {
+    setLocalInterval(newInterval);
+    if (isConnected && selectedBoardId) {
       controlClient.send({
         type: 'settings_update',
         settings: {
           interval: newInterval,
-          transition: content.transition,
+          transition: localTransition,
+        },
+      });
+      updateBoard(selectedBoardId, {
+        settings: {
+          slideInterval: newInterval,
+          autoLoop: true,
+          showIndicators: true,
+          transition: localTransition,
         },
       });
     }
   };
 
   const handleTransitionChange = (newTransition: TransitionType) => {
-    setTransition(newTransition);
-    saveSettings(content.interval, newTransition);
-    // Send settings update to TV if connected
-    if (isConnected) {
+    setLocalTransition(newTransition);
+    if (isConnected && selectedBoardId) {
       controlClient.send({
         type: 'settings_update',
         settings: {
-          interval: content.interval,
+          interval: localInterval,
+          transition: newTransition,
+        },
+      });
+      updateBoard(selectedBoardId, {
+        settings: {
+          slideInterval: localInterval,
+          autoLoop: true,
+          showIndicators: true,
           transition: newTransition,
         },
       });
@@ -270,7 +390,6 @@ export default function ControlScreen() {
     if (scanned) return;
     setScanned(true);
 
-    // Parse the QR code: tdsqr://IP:PORT/PIN
     const match = data.match(/tdsqr:\/\/([^:]+):(\d+)\/(\d+)/);
     if (match) {
       const ip = match[1];
@@ -327,13 +446,26 @@ export default function ControlScreen() {
       syncStatus: 'pending',
     };
 
-    const updatedQRs = [...content.qrItems, newQR];
-    addQRItem(newQR);
-    saveContent(updatedQRs, content.slideItems);
+    const updatedQRs = [...localQRItems, newQR];
+    setLocalQRItems(updatedQRs);
 
-    // Sync to TV if connected
-    if (isConnected) {
-      syncContentToTV(updatedQRs, content.slideItems);
+    if (isConnected && selectedBoardId) {
+      setIsSyncing(true);
+      setSyncingItemIds(new Set([newQR.id]));
+      controlClient.send({
+        type: 'content_update',
+        qrItems: updatedQRs,
+        slideItems: localSlideItems,
+        settings: {
+          interval: localInterval,
+          transition: localTransition,
+        },
+      });
+      updateBoard(selectedBoardId, { qrItems: updatedQRs });
+      setTimeout(() => {
+        setIsSyncing(false);
+        setSyncingItemIds(new Set());
+      }, 5000);
     }
 
     setQrName('');
@@ -358,7 +490,6 @@ export default function ControlScreen() {
         const originalWidth = result.assets[0].width;
         const originalHeight = result.assets[0].height;
 
-        // Calculate crop dimensions for 16:9 aspect ratio
         const targetAspect = 16 / 9;
         const currentAspect = originalWidth / originalHeight;
 
@@ -368,16 +499,13 @@ export default function ControlScreen() {
         let cropY = 0;
 
         if (currentAspect > targetAspect) {
-          // Image is wider than 16:9, crop width
           cropWidth = Math.round(originalHeight * targetAspect);
           cropX = Math.round((originalWidth - cropWidth) / 2);
         } else if (currentAspect < targetAspect) {
-          // Image is taller than 16:9, crop height
           cropHeight = Math.round(originalWidth / targetAspect);
           cropY = Math.round((originalHeight - cropHeight) / 2);
         }
 
-        // Crop and resize image to 16:9 format (max 1920x1080 for performance)
         const manipulatedImage = await ImageManipulator.manipulateAsync(
           originalUri,
           [
@@ -402,27 +530,39 @@ export default function ControlScreen() {
           }
         );
 
-        // Convert processed image to base64
         const base64 = await FileSystem.readAsStringAsync(manipulatedImage.uri, {
           encoding: FileSystem.EncodingType.Base64,
         });
 
         const newSlide: SlideItem = {
           id: Date.now().toString(),
-          name: slideName || `Slide ${content.slideItems.length + 1}`,
+          name: slideName || `Slide ${localSlideItems.length + 1}`,
           imageUri: manipulatedImage.uri,
           imageBase64: `data:image/jpeg;base64,${base64}`,
           createdAt: Date.now(),
           syncStatus: 'pending',
         };
 
-        const updatedSlides = [...content.slideItems, newSlide];
-        addSlideItem(newSlide);
-        saveContent(content.qrItems, updatedSlides);
+        const updatedSlides = [...localSlideItems, newSlide];
+        setLocalSlideItems(updatedSlides);
 
-        // Sync to TV if connected
-        if (isConnected) {
-          syncContentToTV(content.qrItems, updatedSlides);
+        if (isConnected && selectedBoardId) {
+          setIsSyncing(true);
+          setSyncingItemIds(new Set([newSlide.id]));
+          controlClient.send({
+            type: 'content_update',
+            qrItems: localQRItems,
+            slideItems: updatedSlides,
+            settings: {
+              interval: localInterval,
+              transition: localTransition,
+            },
+          });
+          updateBoard(selectedBoardId, { slideItems: updatedSlides });
+          setTimeout(() => {
+            setIsSyncing(false);
+            setSyncingItemIds(new Set());
+          }, 5000);
         }
 
         setSlideName('');
@@ -436,47 +576,59 @@ export default function ControlScreen() {
   };
 
   const handleRemoveQR = (id: string) => {
-    // Mark as deleting
     setDeletingItemIds(prev => new Set(prev).add(id));
 
-    const updatedQRs = content.qrItems.filter((item) => item.id !== id);
-    removeQRItem(id);
-    saveContent(updatedQRs, content.slideItems);
+    const updatedQRs = localQRItems.filter((item) => item.id !== id);
+    setLocalQRItems(updatedQRs);
 
-    // Sync to TV if connected
-    if (isConnected) {
-      syncContentToTV(updatedQRs, content.slideItems);
-    } else {
-      setDeletingItemIds(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(id);
-        return newSet;
+    if (isConnected && selectedBoardId) {
+      controlClient.send({
+        type: 'content_update',
+        qrItems: updatedQRs,
+        slideItems: localSlideItems,
+        settings: {
+          interval: localInterval,
+          transition: localTransition,
+        },
       });
+      updateBoard(selectedBoardId, { qrItems: updatedQRs });
     }
+
+    setDeletingItemIds(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(id);
+      return newSet;
+    });
   };
 
   const handleRemoveSlide = (id: string) => {
-    // Mark as deleting
     setDeletingItemIds(prev => new Set(prev).add(id));
 
-    const updatedSlides = content.slideItems.filter((item) => item.id !== id);
-    removeSlideItem(id);
-    saveContent(content.qrItems, updatedSlides);
+    const updatedSlides = localSlideItems.filter((item) => item.id !== id);
+    setLocalSlideItems(updatedSlides);
 
-    // Sync to TV if connected
-    if (isConnected) {
-      syncContentToTV(content.qrItems, updatedSlides);
-    } else {
-      setDeletingItemIds(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(id);
-        return newSet;
+    if (isConnected && selectedBoardId) {
+      controlClient.send({
+        type: 'content_update',
+        qrItems: localQRItems,
+        slideItems: updatedSlides,
+        settings: {
+          interval: localInterval,
+          transition: localTransition,
+        },
       });
+      updateBoard(selectedBoardId, { slideItems: updatedSlides });
     }
+
+    setDeletingItemIds(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(id);
+      return newSet;
+    });
   };
 
   const handleStartPresentation = () => {
-    if (content.qrItems.length === 0 && content.slideItems.length === 0) {
+    if (localQRItems.length === 0 && localSlideItems.length === 0) {
       Alert.alert(t('noContent'), t('noContentToStart'));
       return;
     }
@@ -492,7 +644,56 @@ export default function ControlScreen() {
     setConnected(false);
     setControlState('scan');
     setScanned(false);
+    setSelectedBoardId(null);
+    setCurrentBoard(null);
     router.replace('/');
+  };
+
+  const handleChangeBoard = () => {
+    setControlState('select_board');
+  };
+
+  const handleCreateNewBoard = () => {
+    router.push({
+      pathname: '/board-editor' as any,
+      params: { boardId: 'new' },
+    });
+  };
+
+  const formatDate = (timestamp: number) => {
+    return new Date(timestamp).toLocaleDateString();
+  };
+
+  const renderBoardItem = ({ item }: { item: MenuBoard }) => {
+    const itemCount = item.qrItems.length + item.slideItems.length;
+
+    return (
+      <TouchableOpacity
+        style={styles.boardCard}
+        onPress={() => selectBoard(item)}
+      >
+        <View style={styles.boardInfo}>
+          <Text style={styles.boardName}>{item.name || t('untitled') || 'Untitled'}</Text>
+          {item.description ? (
+            <Text style={styles.boardDescription} numberOfLines={1}>
+              {item.description}
+            </Text>
+          ) : null}
+          <View style={styles.boardMeta}>
+            <Text style={styles.boardMetaText}>
+              {itemCount} {t('elements')}
+            </Text>
+            <Text style={styles.boardMetaSeparator}>•</Text>
+            <Text style={styles.boardMetaText}>
+              {formatDate(item.updatedAt)}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.boardArrow}>
+          <Text style={styles.boardArrowText}>›</Text>
+        </View>
+      </TouchableOpacity>
+    );
   };
 
   // Connection screens
@@ -636,6 +837,64 @@ export default function ControlScreen() {
     );
   }
 
+  // Board selection screen
+  if (controlState === 'select_board') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <View style={styles.headerLeft}>
+            <Text style={styles.logo}>{t('appName')}</Text>
+            <View style={styles.connectedBadge}>
+              <View style={styles.connectedDot} />
+              <Text style={styles.connectedText}>{t('connected')}</Text>
+            </View>
+          </View>
+          <TouchableOpacity style={styles.disconnectButton} onPress={handleDisconnect}>
+            <Text style={styles.disconnectButtonText}>{t('disconnect')}</Text>
+          </TouchableOpacity>
+        </View>
+
+        <Text style={styles.selectBoardTitle}>
+          {t('selectTemplate') || 'Select Template'}
+        </Text>
+        <Text style={styles.selectBoardHint}>
+          {t('selectBoardHint') || 'Select a template to sync with the TV'}
+        </Text>
+
+        {loadingBoards ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#2DD4BF" />
+          </View>
+        ) : boards.length === 0 ? (
+          <View style={styles.emptyBoardsContainer}>
+            <Text style={styles.emptyStateText}>{t('noBoards') || 'No templates yet'}</Text>
+            <Text style={styles.emptyStateHint}>
+              {t('createBoardHint') || 'Create your first template to organize your content'}
+            </Text>
+            <TouchableOpacity style={styles.createBoardButton} onPress={handleCreateNewBoard}>
+              <Text style={styles.createBoardButtonText}>{t('createBoard') || 'Create Template'}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            <FlatList
+              data={boards}
+              keyExtractor={(item) => item.id}
+              renderItem={renderBoardItem}
+              contentContainerStyle={styles.boardsList}
+              showsVerticalScrollIndicator={false}
+            />
+            <View style={styles.createBoardFooter}>
+              <TouchableOpacity style={styles.createBoardFab} onPress={handleCreateNewBoard}>
+                <Text style={styles.createBoardFabText}>+</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+      </SafeAreaView>
+    );
+  }
+
   // Connected state - Content management
   return (
     <SafeAreaView style={styles.container}>
@@ -653,6 +912,15 @@ export default function ControlScreen() {
           <Text style={styles.disconnectButtonText}>{t('disconnect') || 'Desconectar'}</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Current board indicator */}
+      <TouchableOpacity style={styles.currentBoardBar} onPress={handleChangeBoard}>
+        <View style={styles.currentBoardInfo}>
+          <Text style={styles.currentBoardLabel}>{t('currentTemplate') || 'Template'}:</Text>
+          <Text style={styles.currentBoardName}>{currentBoard?.name || t('untitled')}</Text>
+        </View>
+        <Text style={styles.changeBoardText}>{t('change') || 'Change'}</Text>
+      </TouchableOpacity>
 
       <View style={styles.tabs}>
         <TouchableOpacity
@@ -698,14 +966,14 @@ export default function ControlScreen() {
               </TouchableOpacity>
             </View>
 
-            {content.qrItems.length === 0 ? (
+            {localQRItems.length === 0 ? (
               <View style={styles.emptyState}>
                 <Text style={styles.emptyStateText}>{t('noQRCodes')}</Text>
                 <Text style={styles.emptyStateHint}>{t('addQRHint')}</Text>
               </View>
             ) : (
               <View style={styles.itemsList}>
-                {content.qrItems.map((item) => {
+                {localQRItems.map((item) => {
                   const itemSyncStatus: SyncStatus | undefined = deletingItemIds.has(item.id)
                     ? 'deleting'
                     : syncingItemIds.has(item.id)
@@ -774,14 +1042,14 @@ export default function ControlScreen() {
               </Text>
             </View>
 
-            {content.slideItems.length === 0 ? (
+            {localSlideItems.length === 0 ? (
               <View style={styles.emptyState}>
                 <Text style={styles.emptyStateText}>{t('noImages')}</Text>
                 <Text style={styles.emptyStateHint}>{t('selectImageHint')}</Text>
               </View>
             ) : (
               <View style={styles.itemsList}>
-                {content.slideItems.map((item) => {
+                {localSlideItems.map((item) => {
                   const itemSyncStatus: SyncStatus | undefined = deletingItemIds.has(item.id)
                     ? 'deleting'
                     : syncingItemIds.has(item.id)
@@ -828,14 +1096,14 @@ export default function ControlScreen() {
                   key={opt}
                   style={[
                     styles.settingOption,
-                    content.interval === opt && styles.settingOptionActive,
+                    localInterval === opt && styles.settingOptionActive,
                   ]}
                   onPress={() => handleIntervalChange(opt)}
                 >
                   <Text
                     style={[
                       styles.settingOptionText,
-                      content.interval === opt && styles.settingOptionTextActive,
+                      localInterval === opt && styles.settingOptionTextActive,
                     ]}
                   >
                     {opt}s
@@ -854,14 +1122,14 @@ export default function ControlScreen() {
                   style={[
                     styles.settingOption,
                     styles.settingOptionWide,
-                    content.transition === opt.value && styles.settingOptionActive,
+                    localTransition === opt.value && styles.settingOptionActive,
                   ]}
                   onPress={() => handleTransitionChange(opt.value)}
                 >
                   <Text
                     style={[
                       styles.settingOptionText,
-                      content.transition === opt.value && styles.settingOptionTextActive,
+                      localTransition === opt.value && styles.settingOptionTextActive,
                     ]}
                   >
                     {t(opt.value) || opt.label}
@@ -881,12 +1149,23 @@ export default function ControlScreen() {
           <Text style={styles.settingsButtonText}>⚙</Text>
         </TouchableOpacity>
         <Text style={styles.contentCount}>
-          {content.qrItems.length + content.slideItems.length} {t('elements')}
+          {localQRItems.length + localSlideItems.length} {t('elements')}
         </Text>
         <TouchableOpacity style={styles.startButton} onPress={handleStartPresentation}>
           <Text style={styles.startButtonText}>{t('startOnTV')}</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Sync Progress Modal */}
+      <SyncProgress
+        visible={showSyncProgress}
+        progress={syncProgress}
+        currentItem={currentSyncItem}
+        totalItems={totalSyncItems}
+        status={syncStatus}
+        title={t('syncingToTV') || 'Sincronizando con TV...'}
+        subtitle={t('pleaseWait') || 'Por favor espera...'}
+      />
     </SafeAreaView>
   );
 }
@@ -1022,6 +1301,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#4B5563',
     borderRadius: 8,
+    alignSelf: 'center',
   },
   backToHomeButtonText: {
     fontSize: 14,
@@ -1086,6 +1366,149 @@ const styles = StyleSheet.create({
   },
   connectedText: {
     fontSize: 12,
+    color: '#5EEAD4',
+  },
+  // Board selection styles
+  selectBoardTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    textAlign: 'center',
+    marginTop: 20,
+  },
+  selectBoardHint: {
+    fontSize: 14,
+    color: '#9CA3AF',
+    textAlign: 'center',
+    marginTop: 8,
+    marginBottom: 20,
+    paddingHorizontal: 20,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyBoardsContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 40,
+  },
+  boardsList: {
+    padding: 20,
+    gap: 12,
+  },
+  boardCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#16161F',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#2D2D3A',
+    marginBottom: 12,
+  },
+  boardInfo: {
+    flex: 1,
+  },
+  boardName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginBottom: 4,
+  },
+  boardDescription: {
+    fontSize: 14,
+    color: '#9CA3AF',
+    marginBottom: 8,
+  },
+  boardMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  boardMetaText: {
+    fontSize: 12,
+    color: '#6B7280',
+  },
+  boardMetaSeparator: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginHorizontal: 8,
+  },
+  boardArrow: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  boardArrowText: {
+    fontSize: 24,
+    color: '#6B7280',
+  },
+  createBoardButton: {
+    backgroundColor: '#2DD4BF',
+    paddingVertical: 14,
+    paddingHorizontal: 28,
+    borderRadius: 12,
+    marginTop: 16,
+  },
+  createBoardButtonText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  createBoardFooter: {
+    position: 'absolute',
+    bottom: 30,
+    right: 20,
+  },
+  createBoardFab: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#2DD4BF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#2DD4BF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  createBoardFabText: {
+    fontSize: 28,
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+  },
+  // Current board bar
+  currentBoardBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(45, 212, 191, 0.1)',
+    marginHorizontal: 20,
+    marginBottom: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(45, 212, 191, 0.3)',
+  },
+  currentBoardInfo: {
+    flex: 1,
+  },
+  currentBoardLabel: {
+    fontSize: 12,
+    color: '#9CA3AF',
+  },
+  currentBoardName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#2DD4BF',
+  },
+  changeBoardText: {
+    fontSize: 14,
     color: '#5EEAD4',
   },
   tabs: {

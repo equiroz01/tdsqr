@@ -12,6 +12,10 @@ type MessageType =
   | 'settings_update'
   | 'start_presentation'
   | 'stop_presentation'
+  | 'sync_start'
+  | 'sync_item'
+  | 'sync_complete'
+  | 'sync_progress'
   | 'ping'
   | 'pong';
 
